@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+duckdb
+pandas
+numpy
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+httpx
+pytest
+sqlalchemy
+yfinance

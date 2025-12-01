@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "C:\Users\jallu\OneDrive\pgp\Python\Stock predictor\Rubik_view\Engine\indicator_runner.py", line 4, in <module>
+    import xlwings as xw
+ModuleNotFoundError: No module named 'xlwings'

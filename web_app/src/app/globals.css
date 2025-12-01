@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Default to Dark/Financial Theme */
+    --background: 222 47% 11%;
+    /* #0f172a - Slate 900 */
+    --foreground: 210 40% 98%;
+    /* Slate 50 */
+
+    --card: 217 33% 17%;
+    /* Slate 800 */
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 199 89% 48%;
+    /* Sky 500 - Neon Blue */
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 199 89% 48%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 199 89% 48%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    background-image:
+      radial-gradient(circle at 50% 0%, hsl(222, 47%, 15%) 0%, transparent 75%),
+      radial-gradient(circle at 0% 50%, hsl(222, 47%, 13%) 0%, transparent 50%);
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-slate-900/70 backdrop-blur-md border border-slate-700/50 shadow-xl;
+  }
+
+  .glass-card {
+    @apply bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 hover:bg-slate-800/70 transition-all duration-300;
+  }
+
+  .text-glow {
+    text-shadow: 0 0 10px hsla(199, 89%, 48%, 0.5);
+  }
+}
