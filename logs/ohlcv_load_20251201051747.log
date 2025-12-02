@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Users\jallu\OneDrive\pgp\Python\Stock predictor\Rubik_view\Data\OHCLV Data\update_stocks_ohlcv.py", line 8, in <module>
-    import xlwings as xw
-ModuleNotFoundError: No module named 'xlwings'

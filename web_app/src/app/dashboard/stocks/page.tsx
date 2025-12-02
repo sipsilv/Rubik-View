@@ -5,7 +5,8 @@ import Link from "next/link";
 import api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Search } from "lucide-react";
+import { Search } from "lucide-react";
+import { RubikLoader } from "@/components/RubikLoader";
 
 export default function StocksPage() {
     const [stocks, setStocks] = useState<string[]>([]);
@@ -61,9 +62,7 @@ export default function StocksPage() {
                 </CardHeader>
                 <CardContent>
                     {loading ? (
-                        <div className="flex justify-center p-8">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                        </div>
+                        <RubikLoader label="Loading stocks..." size="md" />
                     ) : (
                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                             {filteredStocks.slice(0, 100).map((symbol) => (

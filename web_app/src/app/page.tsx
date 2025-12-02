@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import api from "@/lib/api";
-import { Lock, Mail, Loader2, TrendingUp, ArrowRight } from "lucide-react";
+import { Lock, Mail, ArrowRight } from "lucide-react";
+import RubikCube from "@/components/RubikCube";
+import SimpleSpinner from "@/components/SimpleSpinner";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -47,12 +49,15 @@ export default function LoginPage() {
       {/* Left Side - Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 relative z-10">
         <div className="glass-panel w-full max-w-md p-8 rounded-2xl space-y-8 border-slate-700/50">
-          <div className="text-center space-y-2">
-            <div className="h-12 w-12 bg-gradient-to-br from-sky-500 to-blue-600 rounded-xl mx-auto flex items-center justify-center shadow-lg shadow-sky-500/20">
-              <span className="text-white font-bold text-2xl">R</span>
+          {/* Logo at top - solving animation */}
+          <div className="text-center space-y-4">
+            <div className="flex justify-center">
+              <RubikCube size={55} />
             </div>
-            <h1 className="text-3xl font-bold tracking-tight text-white">Welcome Back</h1>
-            <p className="text-slate-400">Enter your credentials to access the terminal.</p>
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-white">Welcome Back</h1>
+              <p className="text-slate-400 mt-1">Enter your credentials to access Rubik View.</p>
+            </div>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
@@ -96,7 +101,11 @@ export default function LoginPage() {
               className="w-full h-11 bg-sky-500 hover:bg-sky-400 text-white font-semibold shadow-lg shadow-sky-500/20 transition-all duration-200"
               disabled={loading}
             >
-              {loading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <span className="flex items-center gap-2">Sign In <ArrowRight className="h-4 w-4" /></span>}
+              {loading ? (
+                <SimpleSpinner size={20} />
+              ) : (
+                <span className="flex items-center gap-2">Sign In <ArrowRight className="h-4 w-4" /></span>
+              )}
             </Button>
           </form>
 
@@ -112,14 +121,14 @@ export default function LoginPage() {
         <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-sky-900/20 via-slate-900 to-slate-900"></div>
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
 
-        <div className="relative z-10 text-center space-y-6 p-12 max-w-lg">
-          <div className="inline-flex items-center justify-center p-6 bg-sky-500/10 rounded-3xl mb-4 ring-1 ring-sky-500/30 backdrop-blur-sm shadow-[0_0_50px_rgba(14,165,233,0.2)]">
-            <TrendingUp className="h-16 w-16 text-sky-400" />
+        <div className="relative z-10 text-center space-y-8 p-12 max-w-lg">
+          <div className="inline-flex items-center justify-center">
+            <RubikCube size={130} />
           </div>
           <h2 className="text-5xl font-bold text-white tracking-tight">
-            Advanced Market <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-blue-500">Intelligence</span>
+            Rubik <span className="text-slate-400">View</span>
           </h2>
-          <p className="text-slate-400 text-lg leading-relaxed">
+          <p className="text-slate-500 text-lg leading-relaxed">
             Real-time analytics, AI-driven predictions, and institutional-grade data at your fingertips.
           </p>
         </div>

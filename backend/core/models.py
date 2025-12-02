@@ -69,6 +69,21 @@ class AdminJob(Base):
     finished_at = Column(DateTime, nullable=True)
 
 
+class JobSchedule(Base):
+    __tablename__ = "job_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_type = Column(String, nullable=False)  # "ohlcv_load", "signal_process"
+    schedule_type = Column(String, nullable=False)  # "daily", "weekly", "interval", "cron"
+    schedule_value = Column(String, nullable=False)  # JSON string with schedule details
+    is_active = Column(Boolean, default=True)
+    next_run_at = Column(DateTime, nullable=True)
+    last_run_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
 class IndicatorConfig(Base):
     __tablename__ = "indicator_configs"
 
@@ -84,3 +99,19 @@ class IndicatorConfig(Base):
     ai_latest_weight = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class UserFeedback(Base):
+    __tablename__ = "user_feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    feedback_type = Column(String, nullable=False)  # "feedback", "feature_request", "bug_report"
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    status = Column(String, default="pending")  # "pending", "reviewed", "in_progress", "completed", "rejected"
+    admin_notes = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")

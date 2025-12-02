@@ -16,6 +16,10 @@ if USE_EXCEL:
 else:
     xw = None  # type: ignore
 
+# Fast mode for backend runs: limit symbols / indicators / threads so the job
+# completes more quickly when triggered from the Admin console.
+FAST_MODE = os.getenv("RUBIKVIEW_FAST_MODE") == "1"
+
 # === Dynamic Path Setup ===
 def find_project_root(marker="rubikview.xlsm"):
     curr = Path(__file__).resolve()
@@ -98,12 +102,12 @@ def main():
             sht = xw.Book(str(EXCEL_FILE)).sheets[INDICATOR_SHEET]
             ind_df = sht.range("A1").options(pd.DataFrame, header=1, index=False, expand="table").value
         except Exception as e:
-            print(f"❌ Could not read Excel config: {e}")
+            print(f"[ERROR] Could not read Excel config: {e}")
             raise SystemExit
     else:
         # Read from SQLite indicator_configs
         if not CONFIG_DB.exists():
-            print("❌ No indicator config DB found. Please configure indicators in the UI.")
+            print("[ERROR] No indicator config DB found. Please configure indicators in the UI.")
             raise SystemExit(1)
         conn = sqlite3.connect(CONFIG_DB)
         try:
@@ -131,11 +135,21 @@ def main():
         print("No active indicators! Exiting.")
         raise SystemExit(1)
     print(f"Active indicators: {len(active_inds)}")
+    if FAST_MODE and len(active_inds) > 10:
+        # In fast mode, only calculate a smaller core set of indicators to keep
+        # per-symbol work light. The full set can still be run from Excel.
+        active_inds = active_inds.head(10)
+        print(f"FAST_MODE enabled -> limiting indicators to first {len(active_inds)} active rows")
 
     # Get symbols from OHLCV DB
     with duckdb.connect(str(OHLCV_DB), read_only=True) as con:
         symbols = con.execute("SELECT DISTINCT symbol FROM yahoo_ohlcv").fetchdf()['symbol'].tolist()
     print(f"Symbols: {len(symbols)}")
+    if FAST_MODE and len(symbols) > 500:
+        # For fast, UI-triggered runs, process only a subset of symbols so the
+        # job returns quickly. Full universe can be handled offline.
+        symbols = symbols[:500]
+        print(f"FAST_MODE enabled -> limiting symbols to first {len(symbols)}")
 
     # Prep signals DB
     with duckdb.connect(str(SIGNALS_DB)) as con:
@@ -235,6 +249,11 @@ def main():
     messages = []
     N_THREADS = 20
     UPDATE_FREQ = 10  # update summary in Excel every 10 symbols
+    if FAST_MODE:
+        # Slightly lower parallelism to reduce contention / throttling, which
+        # often improves effective throughput for mixed IO/CPU work.
+        N_THREADS = 12
+        UPDATE_FREQ = 25
 
     with ThreadPoolExecutor(max_workers=N_THREADS) as executor:
         futures = {executor.submit(process_symbol, sym): sym for sym in symbols}
@@ -249,7 +268,7 @@ def main():
             if done % UPDATE_FREQ == 0 or done == len(symbols):
                 update_excel_progress(done, len(symbols), messages)
 
-    print("✅ Done.")
+    print("[OK] Done.")
     update_excel_progress(len(symbols), len(symbols), messages)   # Final update
 
     # FORCE EXCEL RECALC (optional, helps show correct numbers immediately)
@@ -276,9 +295,9 @@ def main():
             con.register("batch", df_signals)
             con.execute("INSERT INTO signals SELECT * FROM batch")
             con.unregister("batch")
-        print("🎉 All signals saved to signals.duckdb.")
+        print("[OK] All signals saved to signals.duckdb.")
     else:
-        print("⚠ No new signals to insert.")
+        print("[WARN] No new signals to insert.")
 
 if __name__ == "__main__":
     main()

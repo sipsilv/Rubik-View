@@ -1,6 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Users\jallu\OneDrive\pgp\Python\Stock predictor\Rubik_view\Engine\indicator_runner.py", line 8, in <module>
-    from indicators import *
-  File "C:\Users\jallu\OneDrive\pgp\Python\Stock predictor\Rubik_view\Engine\indicators.py", line 1, in <module>
-    import talib
-ModuleNotFoundError: No module named 'talib'

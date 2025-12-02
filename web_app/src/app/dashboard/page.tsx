@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import {
-    Loader2,
     TrendingUp,
     TrendingDown,
     Activity,
@@ -16,6 +15,7 @@ import {
     ArrowUpCircle,
     ArrowDownCircle,
 } from "lucide-react";
+import { RubikLoader } from "@/components/RubikLoader";
 import StockTable from "@/components/StockTable";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -106,7 +106,7 @@ export default function DashboardPage() {
     }, [picks]);
 
     return (
-        <div className="min-h-screen bg-slate-900 text-white p-8 pl-72 space-y-8">
+        <div className="min-h-screen bg-slate-900 text-white p-8 space-y-8">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                     <p className="text-xs uppercase text-slate-500 tracking-[0.4em]">Markets</p>
@@ -187,9 +187,7 @@ export default function DashboardPage() {
                         </div>
                     </div>
                     {loading ? (
-                        <div className="flex justify-center p-12">
-                            <Loader2 className="h-10 w-10 animate-spin text-sky-500" />
-                        </div>
+                        <RubikLoader label="Loading picks..." size="md" />
                     ) : error ? (
                         <div className="text-center p-8 glass-panel rounded-xl border border-red-500/30">
                             <p className="text-red-300">{error}</p>

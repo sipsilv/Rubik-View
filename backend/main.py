@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core import database, models, security
+# scheduler as scheduler_module  # Temporarily disabled
 from .core.config import settings
 from .api import auth, stocks, analysis, admin
 
@@ -123,6 +124,9 @@ upgrade_indicator_schema_if_needed()
 
 # 3) Ensure superadmin row exists
 ensure_superadmin()
+
+# 4) Initialize job scheduler
+# scheduler_module.init_scheduler()  # Temporarily disabled
 
 app = FastAPI(
     title="Rubik View API",

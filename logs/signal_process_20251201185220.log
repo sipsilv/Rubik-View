@@ -1,0 +1,12 @@
+Active indicators: 24
+Traceback (most recent call last):
+  File "C:\Users\jallu\OneDrive\pgp\Python\Stock predictor\Rubik_view\Engine\indicator_runner.py", line 284, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\jallu\OneDrive\pgp\Python\Stock predictor\Rubik_view\Engine\indicator_runner.py", line 136, in main
+    with duckdb.connect(str(OHLCV_DB), read_only=True) as con:
+         ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_duckdb.IOException: IO Error: Cannot open file "c:\users\jallu\onedrive\pgp\python\stock predictor\rubik_view\data\ohclv data\stocks.duckdb": The process cannot access the file because it is being used by another process.
+
+File is already open in 
+C:\Python313\python.exe (PID 27636)

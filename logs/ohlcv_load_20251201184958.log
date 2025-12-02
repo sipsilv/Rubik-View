@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "C:\Users\jallu\OneDrive\pgp\Python\Stock predictor\Rubik_view\Data\OHCLV Data\update_stocks_ohlcv.py", line 227, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\jallu\OneDrive\pgp\Python\Stock predictor\Rubik_view\Data\OHCLV Data\update_stocks_ohlcv.py", line 188, in main
+    init_db()
+    ~~~~~~~^^
+  File "C:\Users\jallu\OneDrive\pgp\Python\Stock predictor\Rubik_view\Data\OHCLV Data\update_stocks_ohlcv.py", line 49, in init_db
+    conn = duckdb.connect(str(DB_PATH))
+_duckdb.IOException: IO Error: Cannot open file "c:\users\jallu\onedrive\pgp\python\stock predictor\rubik_view\data\ohclv data\stocks.duckdb": The process cannot access the file because it is being used by another process.
+
+File is already open in 
+C:\Python313\python.exe (PID 27636)

@@ -313,3 +313,91 @@ async def delete_user(
 
     db.delete(user)
     db.commit()
+
+
+# ========== User Feedback Endpoints ==========
+
+@router.post("/feedback", response_model=schemas.UserFeedbackResponse, status_code=status.HTTP_201_CREATED)
+async def create_feedback(
+    payload: schemas.UserFeedbackCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Submit feedback, feature request, or bug report."""
+    feedback = models.UserFeedback(
+        user_id=current_user.id,
+        feedback_type=payload.feedback_type,
+        title=payload.title,
+        description=payload.description,
+        status="pending",
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return feedback
+
+
+@router.get("/feedback", response_model=List[schemas.UserFeedbackResponse])
+async def list_my_feedback(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List feedback submitted by the current user."""
+    return (
+        db.query(models.UserFeedback)
+        .filter(models.UserFeedback.user_id == current_user.id)
+        .order_by(models.UserFeedback.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+
+@router.get("/feedback/all", response_model=List[schemas.UserFeedbackResponse])
+async def list_all_feedback(
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: List all feedback from all users."""
+    return (
+        db.query(models.UserFeedback)
+        .order_by(models.UserFeedback.created_at.desc())
+        .limit(100)
+        .all()
+    )
+
+
+@router.put("/feedback/{feedback_id}", response_model=schemas.UserFeedbackResponse)
+async def update_feedback(
+    feedback_id: int,
+    payload: schemas.UserFeedbackUpdate,
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: Update feedback status or add notes."""
+    feedback = db.query(models.UserFeedback).filter(models.UserFeedback.id == feedback_id).first()
+    if not feedback:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+
+    if payload.status is not None:
+        feedback.status = payload.status
+    if payload.admin_notes is not None:
+        feedback.admin_notes = payload.admin_notes
+
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return feedback
+
+
+@router.delete("/feedback/{feedback_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_feedback(
+    feedback_id: int,
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin: Delete a feedback entry."""
+    feedback = db.query(models.UserFeedback).filter(models.UserFeedback.id == feedback_id).first()
+    if not feedback:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    db.delete(feedback)
+    db.commit()

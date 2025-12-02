@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, ShieldCheck, Send, KeyRound, MapPin, User2, LogOut, Edit3, ClipboardList } from "lucide-react";
+import { ShieldCheck, Send, KeyRound, MapPin, User2, LogOut, Edit3, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { RubikLoader } from "@/components/RubikLoader";
+import SimpleSpinner from "@/components/SimpleSpinner";
 
 type Profile = {
     id: number;
@@ -218,7 +219,8 @@ export default function AccountsPage() {
     }
 
     return (
-        <div className="min-h-screen bg-slate-900 text-white p-8 pl-72">
+        <div className="min-h-screen bg-slate-900 text-white p-8"
+        >
             <div className="max-w-5xl mx-auto space-y-8">
                 <header className="border-b border-slate-800 pb-4">
                     <div className="flex items-center gap-3">
@@ -432,7 +434,7 @@ export default function AccountsPage() {
                                     disabled={savingProfile}
                                     className="w-full bg-sky-500 hover:bg-sky-400 text-white"
                                 >
-                                    {savingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Profile"}
+                                    {savingProfile ? <SimpleSpinner size={16} /> : "Save Profile"}
                                 </Button>
                             </form>
                         </section>
@@ -506,7 +508,7 @@ export default function AccountsPage() {
                                     disabled={changingPassword}
                                     className="w-full bg-orange-500 hover:bg-orange-400 text-white"
                                 >
-                                    {changingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : "Update Password"}
+                                    {changingPassword ? <SimpleSpinner size={16} /> : "Update Password"}
                                 </Button>
                             </form>
 
@@ -541,7 +543,7 @@ export default function AccountsPage() {
                             <div className="divide-y divide-slate-800">
                                 {loadingRequests ? (
                                     <div className="flex items-center justify-center gap-2 px-4 py-6 text-slate-400">
-                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <SimpleSpinner size={16} />
                                         Loading change history...
                                     </div>
                                 ) : changeRequests.length === 0 ? (

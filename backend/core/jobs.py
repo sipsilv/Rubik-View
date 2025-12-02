@@ -5,18 +5,19 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from typing import Dict
 
 from sqlalchemy.orm import Session
 
-from . import models, database
+from . import models, database, log_db
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
-LOG_DIR = os.path.join(settings.BASE_DIR, "logs")
-os.makedirs(LOG_DIR, exist_ok=True)
+# Ensure DB is initialized
+log_db.init_db()
 
 SCRIPT_MAP: Dict[str, str] = {
     "ohlcv_load": os.path.join(settings.BASE_DIR, "Data", "OHCLV Data", "update_stocks_ohlcv.py"),
@@ -44,14 +45,11 @@ def start_job(db: Session, job_type: str, triggered_by: str = "manual") -> model
     if _job_is_running(db, job_type):
         raise RuntimeError(f"{job_type} job is already running.")
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    log_path = os.path.join(LOG_DIR, f"{job_type}_{timestamp}.log")
-
     job = models.AdminJob(
         job_type=job_type,
         status="running",
         triggered_by=triggered_by,
-        log_path=log_path,
+        log_path="DB", # Marker to indicate DB logging
         started_at=datetime.utcnow(),
     )
     db.add(job)
@@ -59,42 +57,54 @@ def start_job(db: Session, job_type: str, triggered_by: str = "manual") -> model
     db.refresh(job)
 
     worker = threading.Thread(
-        target=_execute_job, args=(job.id, script_path, log_path, job_type), daemon=True
+        target=_execute_job, args=(job.id, script_path, job_type), daemon=True
     )
     worker.start()
     return job
 
 
-def _execute_job(job_id: int, script_path: str, log_path: str, job_type: str) -> None:
+def _execute_job(job_id: int, script_path: str, job_type: str) -> None:
     session = database.SessionLocal()
     return_code = None
     try:
         # Inherit environment but disable Excel-based progress updates for backend jobs
         env = os.environ.copy()
         env["RUBIKVIEW_DISABLE_EXCEL"] = "1"
-        with open(log_path, "w", encoding="utf-8") as log_file:
-            process = subprocess.Popen(
-                [sys.executable, script_path],
-                stdout=log_file,
-                stderr=log_file,
-                cwd=settings.BASE_DIR,
-                env=env,
-            )
-            PROCESS_MAP[job_id] = process
+        # Force unbuffered Python output so logs appear in real-time.
+        env["PYTHONUNBUFFERED"] = "1"
+        
+        process = subprocess.Popen(
+            [sys.executable, "-u", script_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, # Merge stderr into stdout
+            cwd=settings.BASE_DIR,
+            env=env,
+            text=True, # Text mode
+            bufsize=1, # Line buffered
+        )
+        PROCESS_MAP[job_id] = process
 
-            # Persist PID early so that stop_job can still find and kill the process
-            job = session.get(models.AdminJob, job_id)
-            if job and job.status == "running":
-                try:
-                    details = json.loads(job.details) if job.details else {}
-                except Exception:
-                    details = {}
-                details["pid"] = process.pid
-                job.details = json.dumps(details)
-                session.add(job)
-                session.commit()
+        # Persist PID
+        job = session.get(models.AdminJob, job_id)
+        if job and job.status == "running":
+            try:
+                details = json.loads(job.details) if job.details else {}
+            except Exception:
+                details = {}
+            details["pid"] = process.pid
+            job.details = json.dumps(details)
+            session.add(job)
+            session.commit()
 
-            return_code = process.wait()
+        # Read output in a loop
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                log_db.append_log(job_id, line)
+        
+        return_code = process.poll()
 
         # Process finished, remove handle if still present
         PROCESS_MAP.pop(job_id, None)
@@ -182,6 +192,8 @@ def stop_job(db: Session, job_id: int) -> models.AdminJob:
                 logger.error("Failed to kill job %s with pid %s: %s", job_id, pid, exc)
                 raise RuntimeError("Job process handle not available")
         else:
+            # No live process handle is available – caller may choose to use a
+            # separate "force stop" path that simply marks the job as stopped.
             raise RuntimeError("Job process handle not available")
     finally:
         PROCESS_MAP.pop(job_id, None)
@@ -199,3 +211,30 @@ def stop_job(db: Session, job_id: int) -> models.AdminJob:
     db.refresh(job)
     return job
 
+
+def force_mark_stopped(db: Session, job_id: int) -> models.AdminJob:
+    """
+    Force-mark a job as stopped in the database, without requiring a live
+    subprocess handle. This is useful for cleaning up "stuck" jobs where the
+    underlying OS process has already exited or could not be tracked.
+    """
+    job = db.query(models.AdminJob).filter(models.AdminJob.id == job_id).first()
+    if not job:
+        raise ValueError("Job not found")
+
+    # If the job is already in a terminal state, just return it as-is
+    if job.status in {"completed", "failed", "stopped"}:
+        return job
+
+    job.status = "stopped"
+    job.finished_at = datetime.utcnow()
+    try:
+        details = json.loads(job.details) if job.details else {}
+    except Exception:
+        details = {}
+    details.update({"forced_stop": True})
+    job.details = json.dumps(details)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job

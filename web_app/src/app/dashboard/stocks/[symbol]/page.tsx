@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import api from "@/lib/api";
 import StockChart from "@/components/Chart";
-import { Loader2 } from "lucide-react";
+import { RubikLoader } from "@/components/RubikLoader";
 
 interface HistoryItem {
     date: string;
@@ -40,8 +40,8 @@ export default function StockDetailPage() {
 
     if (loading) {
         return (
-            <div className="flex h-full items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <div className="flex h-full items-center justify-center py-20">
+                <RubikLoader label={`Loading ${symbol}...`} size="md" />
             </div>
         );
     }

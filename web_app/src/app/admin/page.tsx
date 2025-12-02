@@ -15,18 +15,22 @@ import {
     ClipboardList,
     Plus,
     X,
-    Loader2,
-    FileBarChart,
-    Clock,
     Send,
     Trash2,
+    MessageSquarePlus,
+    Lightbulb,
+    Bug,
+    Cpu,
+    Link2,
+    Clock,
+    Edit,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
 import { RubikLoader } from "@/components/RubikLoader";
+import SimpleSpinner from "@/components/SimpleSpinner";
+import { Input } from "@/components/ui/input";
 
 type UserRecord = {
     id: number;
@@ -92,22 +96,34 @@ const jobMeta = {
 
 const SUPER_ADMIN_EMAIL = "jallusandeep@rubikview.com";
 
+type AdminTab = "processors" | "accounts" | "feedback" | "connections" | "job_monitor";
+
+const adminTabs: { key: AdminTab; label: string; description: string; icon: typeof Cpu }[] = [
+    { key: "processors", label: "Processors", description: "OHCLV & Signals Management", icon: Cpu },
+    { key: "connections", label: "Connections", description: "External integrations & APIs", icon: Link2 },
+    { key: "job_monitor", label: "Job Monitor", description: "Background Job Logs & Status", icon: Activity },
+    { key: "accounts", label: "Accounts", description: "User management & requests", icon: Users },
+    { key: "feedback", label: "Feedback & Requests", description: "User feedback submissions", icon: MessageSquarePlus },
+];
+
 export default function AdminPage() {
     const router = useRouter();
-    const sidebarCollapsed = useSidebarCollapsed();
     const [accessLoading, setAccessLoading] = useState(true);
+    const [activeTab, setActiveTab] = useState<AdminTab>("processors");
     const [users, setUsers] = useState<UserRecord[]>([]);
     const [jobs, setJobs] = useState<AdminJob[]>([]);
     const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>([]);
     const [jobAction, setJobAction] = useState<string | null>(null);
     const [jobMessage, setJobMessage] = useState<MessageState>(null);
     const [stoppingJobId, setStoppingJobId] = useState<number | null>(null);
+    const [forcingJobId, setForcingJobId] = useState<number | null>(null);
     const [showCreateDrawer, setShowCreateDrawer] = useState(false);
     const [createMessage, setCreateMessage] = useState<MessageState>(null);
     const [creatingUser, setCreatingUser] = useState(false);
     const [userMessage, setUserMessage] = useState<MessageState>(null);
     const [deletingUserId, setDeletingUserId] = useState<number | null>(null);
     const [notifyingUserId, setNotifyingUserId] = useState<number | null>(null);
+
     type OhlcvStatus = {
         job_id?: number | null;
         status: string;
@@ -142,6 +158,62 @@ export default function AdminPage() {
 
     const [ohlcvStatus, setOhlcvStatus] = useState<OhlcvStatus | null>(null);
     const [signalStatus, setSignalStatus] = useState<SignalStatus | null>(null);
+
+    type FeedbackItem = {
+        id: number;
+        user_id: number;
+        feedback_type: string;
+        title: string;
+        description?: string;
+        status: string;
+        admin_notes?: string;
+        created_at: string;
+        user?: { email: string; full_name?: string };
+    };
+    const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>([]);
+    const [updatingFeedbackId, setUpdatingFeedbackId] = useState<number | null>(null);
+
+    // Job Filters
+    const [jobFilters, setJobFilters] = useState({
+        job_id: "",
+        job_type: "",
+        status: "",
+        triggered_by: "",
+        start_date: "",
+        end_date: "",
+    });
+    const [jobsLoading, setJobsLoading] = useState(false);
+
+    // Job Schedules
+    type ScheduleItem = {
+        id: number;
+        job_type: string;
+        schedule_type: string;
+        schedule_value: string;
+        is_active: boolean;
+        next_run_at?: string | null;
+        last_run_at?: string | null;
+        created_at?: string;
+        updated_at?: string;
+    };
+    const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+    const [showScheduleModal, setShowScheduleModal] = useState(false);
+    const [editingSchedule, setEditingSchedule] = useState<ScheduleItem | null>(null);
+    const [scheduleForm, setScheduleForm] = useState({
+        job_type: "ohlcv_load",
+        schedule_type: "daily" as "daily" | "weekly" | "interval" | "once" | "date_range",
+        hour: 9,
+        minute: 0,
+        day_of_week: 0,
+        interval_hours: 6,
+        interval_minutes: 30,
+        start_date: "",
+        start_time: "09:00",
+        end_date: "",
+        end_time: "17:00",
+        is_active: true,
+    });
+
     const [logViewer, setLogViewer] = useState<{ open: boolean; loading: boolean; jobId?: number; content: string | null; error?: string }>({
         open: false,
         loading: false,
@@ -180,12 +252,137 @@ export default function AdminPage() {
     };
 
     const fetchJobs = async () => {
+        setJobsLoading(true);
         try {
-            const response = await api.get("/admin/jobs");
+            const params = new URLSearchParams();
+            if (jobFilters.job_id) params.append("job_id", jobFilters.job_id);
+            if (jobFilters.job_type) params.append("job_type", jobFilters.job_type);
+            if (jobFilters.status) params.append("status", jobFilters.status);
+            if (jobFilters.triggered_by) params.append("triggered_by", jobFilters.triggered_by);
+            if (jobFilters.start_date) params.append("started_after", jobFilters.start_date);
+            if (jobFilters.end_date) params.append("started_before", jobFilters.end_date);
+
+            const response = await api.get(`/admin/jobs?${params.toString()}`);
             setJobs(response.data);
         } catch (error) {
             console.error("Failed to load jobs", error);
+        } finally {
+            setJobsLoading(false);
         }
+    };
+
+    const handleJobFilterChange = (key: string, value: string) => {
+        setJobFilters((prev) => ({ ...prev, [key]: value }));
+    };
+
+    const handleResetJobFilters = () => {
+        setJobFilters({
+            job_id: "",
+            job_type: "",
+            status: "",
+            triggered_by: "",
+            start_date: "",
+            end_date: "",
+        });
+    };
+
+    const fetchSchedules = async () => {
+        try {
+            const response = await api.get("/admin/schedules?job_type=ohlcv_load");
+            setSchedules(response.data);
+        } catch (error) {
+            console.error("Failed to load schedules", error);
+        }
+    };
+
+    const handleCreateSchedule = async () => {
+        try {
+            let scheduleValue: any = {};
+            
+            if (scheduleForm.schedule_type === "daily") {
+                scheduleValue = { hour: scheduleForm.hour, minute: scheduleForm.minute };
+            } else if (scheduleForm.schedule_type === "weekly") {
+                scheduleValue = { day_of_week: scheduleForm.day_of_week, hour: scheduleForm.hour, minute: scheduleForm.minute };
+            } else if (scheduleForm.schedule_type === "interval") {
+                if (scheduleForm.interval_hours > 0) {
+                    scheduleValue = { hours: scheduleForm.interval_hours };
+                } else {
+                    scheduleValue = { minutes: scheduleForm.interval_minutes };
+                }
+            } else if (scheduleForm.schedule_type === "once") {
+                scheduleValue = { start_date: scheduleForm.start_date, start_time: scheduleForm.start_time };
+            } else if (scheduleForm.schedule_type === "date_range") {
+                scheduleValue = { 
+                    start_date: scheduleForm.start_date, 
+                    start_time: scheduleForm.start_time,
+                    end_date: scheduleForm.end_date,
+                    end_time: scheduleForm.end_time,
+                };
+            }
+
+            const payload = {
+                job_type: scheduleForm.job_type,
+                schedule_type: scheduleForm.schedule_type,
+                schedule_value: scheduleValue,
+                is_active: scheduleForm.is_active,
+            };
+
+            if (editingSchedule) {
+                await api.put(`/admin/schedules/${editingSchedule.id}`, payload);
+            } else {
+                await api.post("/admin/schedules", payload);
+            }
+
+            fetchSchedules();
+            setShowScheduleModal(false);
+            setEditingSchedule(null);
+            setScheduleForm({
+                job_type: "ohlcv_load",
+                schedule_type: "daily",
+                hour: 9,
+                minute: 0,
+                day_of_week: 0,
+                interval_hours: 6,
+                interval_minutes: 30,
+                start_date: "",
+                start_time: "09:00",
+                end_date: "",
+                end_time: "17:00",
+                is_active: true,
+            });
+        } catch (error) {
+            console.error("Failed to save schedule", error);
+        }
+    };
+
+    const handleDeleteSchedule = async (scheduleId: number) => {
+        if (!confirm("Are you sure you want to delete this schedule?")) return;
+        try {
+            await api.delete(`/admin/schedules/${scheduleId}`);
+            fetchSchedules();
+        } catch (error) {
+            console.error("Failed to delete schedule", error);
+        }
+    };
+
+    const handleEditSchedule = (schedule: ScheduleItem) => {
+        const value = JSON.parse(schedule.schedule_value);
+        setEditingSchedule(schedule);
+        setScheduleForm({
+            job_type: schedule.job_type,
+            schedule_type: schedule.schedule_type as any,
+            hour: value.hour || 9,
+            minute: value.minute || 0,
+            day_of_week: value.day_of_week || 0,
+            interval_hours: value.hours || 6,
+            interval_minutes: value.minutes || 30,
+            start_date: value.start_date || "",
+            start_time: value.start_time || "09:00",
+            end_date: value.end_date || "",
+            end_time: value.end_time || "17:00",
+            is_active: schedule.is_active,
+        });
+        setShowScheduleModal(true);
     };
 
     const fetchOhlcvStatus = async () => {
@@ -215,6 +412,27 @@ export default function AdminPage() {
         }
     };
 
+    const fetchFeedback = async () => {
+        try {
+            const response = await api.get("/auth/feedback/all");
+            setFeedbackList(response.data);
+        } catch (error) {
+            console.error("Failed to load feedback", error);
+        }
+    };
+
+    const handleUpdateFeedbackStatus = async (feedbackId: number, newStatus: string) => {
+        setUpdatingFeedbackId(feedbackId);
+        try {
+            await api.put(`/auth/feedback/${feedbackId}`, { status: newStatus });
+            fetchFeedback();
+        } catch (error) {
+            console.error("Failed to update feedback", error);
+        } finally {
+            setUpdatingFeedbackId(null);
+        }
+    };
+
     useEffect(() => {
         if (accessLoading) return;
         fetchUsers();
@@ -222,13 +440,23 @@ export default function AdminPage() {
         fetchOhlcvStatus();
         fetchSignalStatus();
         fetchChangeRequests();
+        fetchFeedback();
+        fetchSchedules();
         const interval = setInterval(() => {
             fetchJobs();
             fetchOhlcvStatus();
             fetchSignalStatus();
-        }, 5000); // refresh every 5s for more real-time feel
+            fetchSchedules();
+        }, 2000);
         return () => clearInterval(interval);
     }, [accessLoading]);
+
+    // Auto-query when filters change
+    useEffect(() => {
+        if (!accessLoading) {
+            fetchJobs();
+        }
+    }, [jobFilters]);
 
     const latestJobs = useMemo(() => {
         const map: Record<string, AdminJob | undefined> = {};
@@ -247,6 +475,8 @@ export default function AdminPage() {
             await api.post(`/admin/jobs/${type}`);
             setJobMessage({ type: "success", text: `${jobMeta[type].title} started.` });
             fetchJobs();
+            fetchOhlcvStatus();
+            fetchSignalStatus();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { detail?: string } } };
             setJobMessage({
@@ -278,29 +508,12 @@ export default function AdminPage() {
         }
     };
 
-    const handleStopAllJobs = async () => {
-        setStoppingJobId(-1);
+    const handleForceStopJob = async (jobId: number) => {
+        setForcingJobId(jobId);
         setJobMessage(null);
-
-        const ids: number[] = [];
-        if (ohlcvStatus?.job_id && ohlcvStatus.status === "running") {
-            ids.push(ohlcvStatus.job_id);
-        }
-        if (signalStatus?.job_id && signalStatus.status === "running") {
-            ids.push(signalStatus.job_id);
-        }
-
-        if (ids.length === 0) {
-            setStoppingJobId(null);
-            setJobMessage({ type: "error", text: "No running jobs to stop." });
-            return;
-        }
-
         try {
-            for (const id of ids) {
-                await api.post(`/admin/jobs/${id}/stop`);
-            }
-            setJobMessage({ type: "success", text: "Stop requested for all running jobs." });
+            await api.post(`/admin/jobs/${jobId}/force-stop`);
+            setJobMessage({ type: "success", text: "Job force-stopped." });
             fetchJobs();
             fetchOhlcvStatus();
             fetchSignalStatus();
@@ -308,10 +521,10 @@ export default function AdminPage() {
             const err = error as { response?: { data?: { detail?: string } } };
             setJobMessage({
                 type: "error",
-                text: err.response?.data?.detail ?? "Unable to stop jobs.",
+                text: err.response?.data?.detail ?? "Unable to force stop job.",
             });
         } finally {
-            setStoppingJobId(null);
+            setForcingJobId(null);
         }
     };
 
@@ -426,108 +639,110 @@ export default function AdminPage() {
         );
     }
 
-    return (
-        <div
-            className={cn(
-                "min-h-screen bg-slate-900 text-white p-8 transition-all duration-300",
-                sidebarCollapsed ? "pl-24" : "pl-72",
-            )}
-        >
-            <div className="max-w-7xl mx-auto space-y-8">
-                <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between border-b border-slate-800 pb-6">
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-red-500/10 rounded-2xl border border-red-500/30">
-                            <Shield className="h-8 w-8 text-red-400" />
-                    </div>
-                    <div>
-                            <p className="text-xs uppercase tracking-[0.4em] text-slate-500">Control Room</p>
-                            <h1 className="text-3xl font-bold">Admin Console</h1>
-                            <p className="text-slate-400 text-sm">Monitor loads, signal pipelines, and account change requests.</p>
-                    </div>
-                </div>
-                    <div className="flex gap-3">
-                        <Button className="bg-sky-500 hover:bg-sky-400 flex items-center gap-2" onClick={() => setShowCreateDrawer(true)}>
-                            <Plus className="h-4 w-4" />
-                            Create User
-                        </Button>
-                        <Button variant="secondary" className="bg-slate-800 hover:bg-slate-700 flex items-center gap-2" onClick={fetchJobs}>
-                            <RefreshCw className="h-4 w-4" />
-                            Refresh
-                        </Button>
-                        </div>
-                </header>
-
-                <section className="grid gap-6 lg:grid-cols-2">
-                    <div className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
-                        <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-3">
-                                <Database className="h-5 w-5 text-sky-300" />
-                                    <div>
-                                    <h3 className="text-lg font-semibold">Load OHCLV Data</h3>
-                                    <p className="text-xs text-slate-500">Backend loader writing directly into duckDB.</p>
-                                    </div>
-                                </div>
-                            {ohlcvStatus && (
-                                <span
-                                    className={cn(
-                                        "px-2 py-0.5 rounded-full text-[11px] font-semibold",
-                                        ohlcvStatus.status === "completed"
-                                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-                                            : ohlcvStatus.status === "running"
-                                            ? "bg-sky-500/15 text-sky-200 border border-sky-500/30"
-                                            : ohlcvStatus.status === "failed"
-                                            ? "bg-rose-500/15 text-rose-200 border border-rose-500/30"
-                                            : "bg-slate-800 text-slate-300 border border-slate-700"
-                                    )}
-                                >
-                                    {ohlcvStatus.status.toUpperCase()}
-                                </span>
-                            )}
+    // ─────────────────────────────────────────────────────────────────────────────
+    // RENDER: Processors Tab Content
+    // ─────────────────────────────────────────────────────────────────────────────
+    const renderProcessorsTab = () => (
+        <div className="space-y-6">
+            {/* OHCLV and Signal Cards */}
+            <section className="grid gap-6 lg:grid-cols-2">
+                {/* OHCLV Card */}
+                <div className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                            <Database className="h-5 w-5 text-sky-300" />
+                            <div>
+                                <h3 className="text-lg font-semibold">Load OHCLV Data</h3>
+                                <p className="text-xs text-slate-500">Backend loader writing directly into duckDB.</p>
+                            </div>
                         </div>
                         {ohlcvStatus && (
-                            <div className="grid grid-cols-2 gap-3 text-xs text-slate-300">
-                                <div className="space-y-1">
-                                    <div className="flex items-center justify-between">
-                                        <span>Total Symbols</span>
-                                        <span className="font-semibold">{ohlcvStatus.total_symbols}</span>
-                            </div>
-                                    <div className="flex items-center justify-between">
-                                        <span>Processed</span>
-                                        <span className="font-semibold">{ohlcvStatus.processed_symbols}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span>Progress</span>
-                                        <span className="font-semibold">{ohlcvStatus.percent_complete.toFixed(1)}%</span>
-                                    </div>
+                            <span
+                                className={cn(
+                                    "px-2 py-0.5 rounded-full text-[11px] font-semibold",
+                                    ohlcvStatus.status === "completed"
+                                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                                        : ohlcvStatus.status === "running"
+                                            ? "bg-sky-500/15 text-sky-200 border border-sky-500/30"
+                                            : ohlcvStatus.status === "failed"
+                                                ? "bg-rose-500/15 text-rose-200 border border-rose-500/30"
+                                                : "bg-slate-800 text-slate-300 border border-slate-700"
+                                )}
+                            >
+                                {ohlcvStatus.status.toUpperCase()}
+                            </span>
+                        )}
+                    </div>
+                    {ohlcvStatus && (
+                        <div className="grid grid-cols-2 gap-3 text-xs text-slate-300">
+                            <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <span>Total Symbols</span>
+                                    <span className="font-semibold">{ohlcvStatus.total_symbols}</span>
                                 </div>
-                                <div className="space-y-1">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-emerald-300">Success</span>
-                                        <span className="font-semibold text-emerald-300">{ohlcvStatus.success}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-yellow-300">Up to date</span>
-                                        <span className="font-semibold text-yellow-300">{ohlcvStatus.uptodate}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-slate-300">Skipped</span>
-                                        <span className="font-semibold">{ohlcvStatus.skipped}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-rose-300">Failed</span>
-                                        <span className="font-semibold text-rose-300">{ohlcvStatus.failed}</span>
+                                <div className="flex items-center justify-between">
+                                    <span>Processed</span>
+                                    <span className="font-semibold">{ohlcvStatus.processed_symbols}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span>Progress</span>
+                                    <span className="font-semibold">{ohlcvStatus.percent_complete.toFixed(1)}%</span>
+                                </div>
+                            </div>
+                            <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-emerald-300">Success</span>
+                                    <span className="font-semibold text-emerald-300">{ohlcvStatus.success}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-yellow-300">Up to date</span>
+                                    <span className="font-semibold text-yellow-300">{ohlcvStatus.uptodate}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-300">Skipped</span>
+                                    <span className="font-semibold">{ohlcvStatus.skipped}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-rose-300">Failed</span>
+                                    <span className="font-semibold text-rose-300">{ohlcvStatus.failed}</span>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                        )}
-                        <div className="flex items-center justify-end gap-2 mt-3">
+                    )}
+                    <div className="flex items-center justify-between gap-2 mt-3">
+                        <Button
+                            variant="secondary"
+                            className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 px-3 text-xs"
+                            onClick={() => {
+                                setEditingSchedule(null);
+                                setScheduleForm({
+                                    job_type: "ohlcv_load",
+                                    schedule_type: "daily",
+                                    hour: 9,
+                                    minute: 0,
+                                    day_of_week: 0,
+                                    interval_hours: 6,
+                                    interval_minutes: 30,
+                                    start_date: "",
+                                    start_time: "09:00",
+                                    end_date: "",
+                                    end_time: "17:00",
+                                    is_active: true,
+                                });
+                                setShowScheduleModal(true);
+                            }}
+                        >
+                            <Clock className="h-3 w-3 mr-1" />
+                            Schedule
+                        </Button>
+                        <div className="flex items-center gap-2">
                             <Button
                                 className="bg-emerald-600 hover:bg-emerald-500 px-4"
                                 onClick={() => handleTriggerJob("ohlcv_load")}
                                 disabled={jobAction !== null || ohlcvStatus?.status === "running"}
                             >
                                 {jobAction === "ohlcv_load" ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <SimpleSpinner size={16} />
                                 ) : (
                                     <>
                                         <Download className="h-4 w-4 mr-1" />
@@ -540,13 +755,9 @@ export default function AdminPage() {
                                     variant="destructive"
                                     className="bg-rose-600 hover:bg-rose-500 px-4"
                                     onClick={() => handleStopJob(ohlcvStatus.job_id!)}
-                                    disabled={stoppingJobId === ohlcvStatus.job_id}
+                                    disabled={stoppingJobId === ohlcvStatus.job_id || forcingJobId === ohlcvStatus.job_id}
                                 >
-                                    {stoppingJobId === ohlcvStatus.job_id ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                        "Stop"
-                                    )}
+                                    {stoppingJobId === ohlcvStatus.job_id ? <SimpleSpinner size={16} /> : "Stop"}
                                 </Button>
                             )}
                             {latestJobs.ohlcv_load && (
@@ -560,399 +771,756 @@ export default function AdminPage() {
                                 </Button>
                             )}
                         </div>
-                        {ohlcvStatus?.last_message && (
-                            <div className="mt-2 rounded-md border border-slate-800 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-300">
-                                <div className="flex items-center justify-between mb-1">
-                                    <span className="uppercase tracking-wide text-slate-500">Live status</span>
-                                    {ohlcvStatus.last_symbol && (
-                                        <span className="font-semibold text-slate-100">{ohlcvStatus.last_symbol}</span>
-                                    )}
-                                </div>
-                                <p className="font-mono whitespace-pre-wrap break-words">
-                                    {ohlcvStatus.last_message}
-                                </p>
-                            </div>
-                        )}
                     </div>
-                    {(Object.keys(jobMeta) as Array<AdminJob["job_type"]>)
-                        .filter((t) => t === "signal_process")
-                        .map((type) => {
-                            const meta = jobMeta[type];
-                            const Icon = meta.icon;
-                            const latest = latestJobs[type];
-                            return (
-                                <div key={type} className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div className="flex items-center gap-3">
-                                            <Icon className={cn("h-5 w-5", meta.accent)} />
-                                            <div>
-                                                <h3 className="text-lg font-semibold">{meta.title}</h3>
-                                                <p className="text-xs text-slate-500">{meta.description}</p>
-                                            </div>
-                                        </div>
-                                        {signalStatus && (
-                                            <span
-                                                className={cn(
-                                                    "px-2 py-0.5 rounded-full text-[11px] font-semibold",
-                                                    signalStatus.status === "completed"
-                                                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-                                                        : signalStatus.status === "running"
-                                                        ? "bg-sky-500/15 text-sky-200 border border-sky-500/30"
-                                                        : signalStatus.status === "failed"
-                                                        ? "bg-rose-500/15 text-rose-200 border border-rose-500/30"
-                                                        : "bg-slate-800 text-slate-300 border border-slate-700"
-                                                )}
-                                            >
-                                                {signalStatus.status.toUpperCase()}
-                                            </span>
-                                        )}
-                                    </div>
-                                    {signalStatus && (
-                                        <div className="grid grid-cols-2 gap-3 text-xs text-slate-300">
-                                            <div className="space-y-1">
-                                                <div className="flex items-center justify-between">
-                                                    <span>Total Symbols</span>
-                                                    <span className="font-semibold">{signalStatus.total_symbols}</span>
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span>Processed</span>
-                                                    <span className="font-semibold">{signalStatus.processed_symbols}</span>
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span>Progress</span>
-                                                    <span className="font-semibold">{signalStatus.percent_complete.toFixed(1)}%</span>
-                                                </div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-emerald-300">Signals written</span>
-                                                    <span className="font-semibold text-emerald-300">{signalStatus.processed}</span>
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-yellow-300">Up to date</span>
-                                                    <span className="font-semibold text-yellow-300">{signalStatus.uptodate}</span>
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-slate-300">Skipped</span>
-                                                    <span className="font-semibold">{signalStatus.skipped}</span>
-                                                </div>
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-rose-300">Errors</span>
-                                                    <span className="font-semibold text-rose-300">{signalStatus.errors}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                    <div className="flex items-center justify-end gap-2 mt-3">
-                                        <Button
-                                            className="bg-emerald-600 hover:bg-emerald-500 px-4"
-                                            onClick={() => handleTriggerJob(type)}
-                                            disabled={jobAction !== null || signalStatus?.status === "running"}
-                                        >
-                                            {jobAction === type ? (
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                            ) : (
-                                                <>
-                                                    <Download className="h-4 w-4 mr-1" />
-                                                    Run Signals
-                                                </>
+                    {schedules.filter(s => s.job_type === "ohlcv_load" && s.is_active).length > 0 && (
+                        <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px]">
+                            <div className="flex items-center gap-2 mb-1">
+                                <Clock className="h-3 w-3 text-amber-400" />
+                                <span className="font-semibold text-amber-300">Scheduled:</span>
+                            </div>
+                            {schedules
+                                .filter(s => s.job_type === "ohlcv_load" && s.is_active)
+                                .map((schedule) => {
+                                    const value = JSON.parse(schedule.schedule_value);
+                                    let scheduleText = "";
+                                    if (schedule.schedule_type === "daily") {
+                                        scheduleText = `Daily at ${String(value.hour || 9).padStart(2, "0")}:${String(value.minute || 0).padStart(2, "0")}`;
+                                    } else if (schedule.schedule_type === "weekly") {
+                                        const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+                                        scheduleText = `Every ${days[value.day_of_week || 0]} at ${String(value.hour || 9).padStart(2, "0")}:${String(value.minute || 0).padStart(2, "0")}`;
+                                    } else if (schedule.schedule_type === "interval") {
+                                        if (value.hours) {
+                                            scheduleText = `Every ${value.hours} hour(s)`;
+                                        } else if (value.minutes) {
+                                            scheduleText = `Every ${value.minutes} minute(s)`;
+                                        }
+                                    } else if (schedule.schedule_type === "once") {
+                                        const runDate = value.start_date ? new Date(value.start_date + "T" + (value.start_time || "09:00")) : null;
+                                        scheduleText = runDate ? `Once on ${runDate.toLocaleDateString()} at ${runDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : "One-time schedule";
+                                    } else if (schedule.schedule_type === "date_range") {
+                                        const startDate = value.start_date ? new Date(value.start_date + "T" + (value.start_time || "09:00")) : null;
+                                        const endDate = value.end_date ? new Date(value.end_date + "T" + (value.end_time || "17:00")) : null;
+                                        if (startDate && endDate) {
+                                            scheduleText = `${startDate.toLocaleDateString()} ${startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} to ${endDate.toLocaleDateString()} ${endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                                        }
+                                    }
+                                    return (
+                                        <div key={schedule.id} className="flex items-center justify-between text-amber-200/80">
+                                            <span>{scheduleText}</span>
+                                            {schedule.next_run_at && (
+                                                <span className="text-amber-300/60">
+                                                    Next: {new Date(schedule.next_run_at).toLocaleString()}
+                                                </span>
                                             )}
-                                        </Button>
-                                        {signalStatus?.job_id && signalStatus.status === "running" && (
-                                            <Button
-                                                variant="destructive"
-                                                className="bg-rose-600 hover:bg-rose-500 px-4"
-                                                onClick={() => handleStopJob(signalStatus.job_id!)}
-                                                disabled={stoppingJobId === signalStatus.job_id}
-                                            >
-                                                {stoppingJobId === signalStatus.job_id ? (
-                                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                                ) : (
-                                                    "Stop"
-                                                )}
-                                            </Button>
-                                        )}
-                                        {latest && (
-                                            <Button
-                                                variant="secondary"
-                                                size="icon"
-                                                className="bg-slate-900 hover:bg-slate-800"
-                                                onClick={() => handleViewLog(latest.id)}
-                                            >
-                                                <Terminal className="h-4 w-4" />
-                                            </Button>
-                                        )}
-                                    </div>
-                                    {signalStatus?.last_message && (
-                                        <div className="mt-2 rounded-md border border-slate-800 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-300">
-                                            <div className="flex items-center justify-between mb-1">
-                                                <span className="uppercase tracking-wide text-slate-500">Live status</span>
-                                                {signalStatus.last_symbol && (
-                                                    <span className="font-semibold text-slate-100">{signalStatus.last_symbol}</span>
-                                                )}
-                                            </div>
-                                            <p className="font-mono whitespace-pre-wrap break-words">
-                                                {signalStatus.last_message}
-                                            </p>
                                         </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                </section>
-
-                {jobMessage && (
-                    <div
-                        className={cn(
-                            "rounded-xl border px-4 py-3 text-sm",
-                            jobMessage.type === "success"
-                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                                : "border-rose-500/30 bg-rose-500/10 text-rose-200"
-                        )}
-                    >
-                        {jobMessage.text}
-                    </div>
-                )}
-
-                <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-                    <div className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <Users className="h-5 w-5 text-sky-400" />
-                                <h3 className="text-lg font-semibold">Accounts</h3>
+                                    );
+                                })}
+                        </div>
+                    )}
+                    {ohlcvStatus && ohlcvStatus.status === "running" && (
+                        <div className="mt-2 rounded-md border border-slate-800 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-300">
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="uppercase tracking-wide text-slate-500">Live status</span>
+                                {ohlcvStatus.last_symbol && (
+                                    <span className="font-semibold text-slate-100">{ohlcvStatus.last_symbol}</span>
+                                )}
                             </div>
+                            <p className="font-mono whitespace-pre-wrap break-words max-h-20 overflow-auto">
+                                {ohlcvStatus.last_message || "Starting..."}
+                            </p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Signal Processing Card */}
+                <div className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                            <Activity className="h-5 w-5 text-emerald-300" />
+                            <div>
+                                <h3 className="text-lg font-semibold">Process Signal Data</h3>
+                                <p className="text-xs text-slate-500">Calculate indicator signals and score rankings.</p>
+                            </div>
+                        </div>
+                        {signalStatus && (
+                            <span
+                                className={cn(
+                                    "px-2 py-0.5 rounded-full text-[11px] font-semibold",
+                                    signalStatus.status === "completed"
+                                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                                        : signalStatus.status === "running"
+                                            ? "bg-sky-500/15 text-sky-200 border border-sky-500/30"
+                                            : signalStatus.status === "failed"
+                                                ? "bg-rose-500/15 text-rose-200 border border-rose-500/30"
+                                                : "bg-slate-800 text-slate-300 border border-slate-700"
+                                )}
+                            >
+                                {signalStatus.status.toUpperCase()}
+                            </span>
+                        )}
+                    </div>
+                    {signalStatus && (
+                        <div className="grid grid-cols-2 gap-3 text-xs text-slate-300">
+                            <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <span>Total Symbols</span>
+                                    <span className="font-semibold">{signalStatus.total_symbols}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span>Processed</span>
+                                    <span className="font-semibold">{signalStatus.processed_symbols}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span>Progress</span>
+                                    <span className="font-semibold">{signalStatus.percent_complete.toFixed(1)}%</span>
+                                </div>
+                            </div>
+                            <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-emerald-300">Signals written</span>
+                                    <span className="font-semibold text-emerald-300">{signalStatus.processed}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-yellow-300">Up to date</span>
+                                    <span className="font-semibold text-yellow-300">{signalStatus.uptodate}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-300">Skipped</span>
+                                    <span className="font-semibold">{signalStatus.skipped}</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-rose-300">Errors</span>
+                                    <span className="font-semibold text-rose-300">{signalStatus.errors}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <div className="flex items-center justify-end gap-2 mt-3">
+                        <Button
+                            className="bg-emerald-600 hover:bg-emerald-500 px-4"
+                            onClick={() => handleTriggerJob("signal_process")}
+                            disabled={jobAction !== null || signalStatus?.status === "running"}
+                        >
+                            {jobAction === "signal_process" ? (
+                                <SimpleSpinner size={16} />
+                            ) : (
+                                <>
+                                    <Download className="h-4 w-4 mr-1" />
+                                    Run Signals
+                                </>
+                            )}
+                        </Button>
+                        {signalStatus?.job_id && signalStatus.status === "running" && (
+                            <Button
+                                variant="destructive"
+                                className="bg-rose-600 hover:bg-rose-500 px-4"
+                                onClick={() => handleStopJob(signalStatus.job_id!)}
+                                disabled={stoppingJobId === signalStatus.job_id || forcingJobId === signalStatus.job_id}
+                            >
+                                {stoppingJobId === signalStatus.job_id ? <SimpleSpinner size={16} /> : "Stop"}
+                            </Button>
+                        )}
+                        {latestJobs.signal_process && (
+                            <Button
+                                variant="secondary"
+                                size="icon"
+                                className="bg-slate-900 hover:bg-slate-800"
+                                onClick={() => handleViewLog(latestJobs.signal_process!.id)}
+                            >
+                                <Terminal className="h-4 w-4" />
+                            </Button>
+                        )}
+                    </div>
+                    {signalStatus && signalStatus.status === "running" && (
+                        <div className="mt-2 rounded-md border border-slate-800 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-300">
+                            <div className="flex items-center justify-between mb-1">
+                                <span className="uppercase tracking-wide text-slate-500">Live status</span>
+                                {signalStatus.last_symbol && (
+                                    <span className="font-semibold text-slate-100">{signalStatus.last_symbol}</span>
+                                )}
+                            </div>
+                            <p className="font-mono whitespace-pre-wrap break-words max-h-20 overflow-auto">
+                                {signalStatus.last_message || "Starting..."}
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            {/* Job Message */}
+            {jobMessage && (
+                <div
+                    className={cn(
+                        "rounded-xl border px-4 py-3 text-sm",
+                        jobMessage.type === "success"
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                            : "border-rose-500/30 bg-rose-500/10 text-rose-200"
+                    )}
+                >
+                    {jobMessage.text}
+                </div>
+            )}
+
+        </div>
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // RENDER: Accounts Tab Content
+    // ─────────────────────────────────────────────────────────────────────────────
+    const renderAccountsTab = () => (
+        <div className="space-y-6">
+            <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+                {/* Users Table */}
+                <div className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Users className="h-5 w-5 text-sky-400" />
+                            <h3 className="text-lg font-semibold">Accounts</h3>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button className="bg-sky-500 hover:bg-sky-400 text-xs flex items-center gap-2" onClick={() => setShowCreateDrawer(true)}>
+                                <Plus className="h-4 w-4" />
+                                Create User
+                            </Button>
                             <Button variant="secondary" className="bg-slate-800 hover:bg-slate-700 text-xs" onClick={fetchUsers}>
                                 <RefreshCw className="h-4 w-4 mr-1" />
                                 Sync
                             </Button>
                         </div>
-                        {userMessage && (
-                            <div
-                                className={cn(
-                                    "rounded-lg border px-3 py-2 text-sm",
-                                    userMessage.type === "success"
-                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                                        : "border-rose-500/30 bg-rose-500/10 text-rose-200"
-                                )}
-                            >
-                                {userMessage.text}
-                            </div>
-                        )}
-                        <div className="overflow-auto rounded-xl border border-slate-800">
-                            <table className="min-w-full text-sm divide-y divide-slate-800">
-                                <thead className="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-500">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left">User</th>
-                                        <th className="px-4 py-3 text-left">Role</th>
-                                        <th className="px-4 py-3 text-left">Phone</th>
-                                        <th className="px-4 py-3 text-left">State</th>
-                                        <th className="px-4 py-3 text-left">Change Requests</th>
-                                        <th className="px-4 py-3 text-left">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-900">
-                                    {users.map((user) => {
-                                        const pending = changeRequests.filter((req) => req.user?.email === user.email);
-                                        const isSuperAdmin = user.email === SUPER_ADMIN_EMAIL;
-                                        return (
-                                            <tr key={user.id} className="hover:bg-slate-900/40">
-                                                <td className="px-4 py-3">
-                                                    <p className="font-semibold text-white">{user.full_name || "Unassigned"}</p>
-                                                    <p className="text-xs text-slate-400">{user.email}</p>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <span
-                                                        className={cn(
-                                                            "px-2 py-0.5 rounded-full text-xs font-semibold",
-                                                            user.role === "admin" || user.role === "superadmin"
-                                                                ? "bg-red-500/15 text-red-300 border border-red-500/30"
-                                                                : "bg-slate-800 text-slate-200 border border-slate-700"
-                                                        )}
-                                                    >
-                                                        {user.role}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3 text-slate-300 text-xs">{user.phone_number || "—"}</td>
-                                                <td className="px-4 py-3 text-slate-300 text-xs">{user.state || user.country || "—"}</td>
-                                                <td className="px-4 py-3 text-slate-300 text-xs">{pending.length}</td>
-                                                <td className="px-4 py-3 text-xs text-slate-300">
-                                                    <div className="flex items-center gap-2">
-                                                        <Button
-                                                            variant="secondary"
-                                                            size="icon"
-                                                            className="bg-slate-900 hover:bg-slate-800"
-                                                            onClick={() => handleNotifyUser(user)}
-                                                            disabled={notifyingUserId === user.id}
-                                                        >
-                                                            {notifyingUserId === user.id ? (
-                                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                            ) : (
-                                                                <Send className="h-4 w-4" />
-                                                            )}
-                                                        </Button>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="text-slate-400 hover:text-rose-400 hover:bg-rose-500/10"
-                                                            disabled={isSuperAdmin || deletingUserId === user.id}
-                                                            onClick={() => handleDeleteUser(user.id)}
-                                                        >
-                                                            {deletingUserId === user.id ? (
-                                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                            ) : (
-                                                                <Trash2 className="h-4 w-4" />
-                                                            )}
-                                                        </Button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                                    </div>
-                                </div>
-                    <div className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
-                        <div className="flex items-center gap-2">
-                            <ClipboardList className="h-5 w-5 text-emerald-300" />
-                            <h3 className="text-lg font-semibold">Change Requests</h3>
-                        </div>
-                        <div className="space-y-3 max-h-[420px] overflow-auto pr-2">
-                            {changeRequests.slice(0, 8).map((request) => (
-                                <div key={request.id} className="rounded-xl border border-slate-800/70 bg-slate-950/60 p-4 space-y-1">
-                                    <div className="flex items-center justify-between text-sm">
-                                        <span className="font-semibold text-slate-100">{request.user?.full_name || request.user?.email}</span>
-                                        <span className="text-xs text-slate-500">{new Date(request.created_at).toLocaleString()}</span>
-                                    </div>
-                                    <p className="text-xs uppercase tracking-wide text-slate-500">{request.request_type.replace("_", " ")}</p>
-                                    <p className="text-sm text-slate-300">{request.details || "No additional details."}</p>
-                                    <span
-                                        className={cn(
-                                            "inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full",
-                                            request.status === "completed"
-                                                ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-                                                : "bg-yellow-500/15 text-yellow-200 border border-yellow-500/30"
-                                        )}
-                                    >
-                                        <Bell className="h-3 w-3" />
-                                        {request.status}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                        <div className="rounded-xl border border-slate-800/60 bg-slate-900/60 p-4 text-xs text-slate-400 space-y-2">
-                            <p className="font-semibold text-slate-200 uppercase tracking-wide">Telegram reminders</p>
-                            <p>Manual notification buttons live in the account drawer. Auto alerts fire when users update their own details.</p>
-                                </div>
                     </div>
-                </section>
+                    {userMessage && (
+                        <div
+                            className={cn(
+                                "rounded-lg border px-3 py-2 text-sm",
+                                userMessage.type === "success"
+                                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                    : "border-rose-500/30 bg-rose-500/10 text-rose-200"
+                            )}
+                        >
+                            {userMessage.text}
+                        </div>
+                    )}
+                    <div className="overflow-auto rounded-xl border border-slate-800">
+                        <table className="min-w-full text-sm divide-y divide-slate-800">
+                            <thead className="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-500">
+                                <tr>
+                                    <th className="px-4 py-3 text-left">User</th>
+                                    <th className="px-4 py-3 text-left">Role</th>
+                                    <th className="px-4 py-3 text-left">Phone</th>
+                                    <th className="px-4 py-3 text-left">State</th>
+                                    <th className="px-4 py-3 text-left">Change Requests</th>
+                                    <th className="px-4 py-3 text-left">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-900">
+                                {users.map((user) => {
+                                    const pending = changeRequests.filter((req) => req.user?.email === user.email);
+                                    const isSuperAdmin = user.email === SUPER_ADMIN_EMAIL;
+                                    return (
+                                        <tr key={user.id} className="hover:bg-slate-900/40">
+                                            <td className="px-4 py-3">
+                                                <p className="font-semibold text-white">{user.full_name || "Unassigned"}</p>
+                                                <p className="text-xs text-slate-400">{user.email}</p>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <span
+                                                    className={cn(
+                                                        "px-2 py-0.5 rounded-full text-xs font-semibold",
+                                                        user.role === "admin" || user.role === "superadmin"
+                                                            ? "bg-red-500/15 text-red-300 border border-red-500/30"
+                                                            : "bg-slate-800 text-slate-200 border border-slate-700"
+                                                    )}
+                                                >
+                                                    {user.role}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3 text-slate-300 text-xs">{user.phone_number || "—"}</td>
+                                            <td className="px-4 py-3 text-slate-300 text-xs">{user.state || user.country || "—"}</td>
+                                            <td className="px-4 py-3 text-slate-300 text-xs">{pending.length}</td>
+                                            <td className="px-4 py-3 text-xs text-slate-300">
+                                                <div className="flex items-center gap-2">
+                                                    <Button
+                                                        variant="secondary"
+                                                        size="icon"
+                                                        className="bg-slate-900 hover:bg-slate-800"
+                                                        onClick={() => handleNotifyUser(user)}
+                                                        disabled={notifyingUserId === user.id}
+                                                    >
+                                                        {notifyingUserId === user.id ? <SimpleSpinner size={16} /> : <Send className="h-4 w-4" />}
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="text-slate-400 hover:text-rose-400 hover:bg-rose-500/10"
+                                                        disabled={isSuperAdmin || deletingUserId === user.id}
+                                                        onClick={() => handleDeleteUser(user.id)}
+                                                    >
+                                                        {deletingUserId === user.id ? <SimpleSpinner size={16} /> : <Trash2 className="h-4 w-4" />}
+                                                    </Button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
 
+                {/* Change Requests */}
+                <div className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
+                    <div className="flex items-center gap-2">
+                        <ClipboardList className="h-5 w-5 text-emerald-300" />
+                        <h3 className="text-lg font-semibold">Change Requests</h3>
+                    </div>
+                    <div className="space-y-3 max-h-[420px] overflow-auto pr-2">
+                        {changeRequests.slice(0, 8).map((request) => (
+                            <div key={request.id} className="rounded-xl border border-slate-800/70 bg-slate-950/60 p-4 space-y-1">
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="font-semibold text-slate-100">{request.user?.full_name || request.user?.email}</span>
+                                    <span className="text-xs text-slate-500">{new Date(request.created_at).toLocaleString()}</span>
+                                </div>
+                                <p className="text-xs uppercase tracking-wide text-slate-500">{request.request_type.replace("_", " ")}</p>
+                                <p className="text-sm text-slate-300">{request.details || "No additional details."}</p>
+                                <span
+                                    className={cn(
+                                        "inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full",
+                                        request.status === "completed"
+                                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                                            : "bg-yellow-500/15 text-yellow-200 border border-yellow-500/30"
+                                    )}
+                                >
+                                    <Bell className="h-3 w-3" />
+                                    {request.status}
+                                </span>
+                            </div>
+                        ))}
+                        {changeRequests.length === 0 && (
+                            <p className="text-slate-500 text-sm">No change requests.</p>
+                        )}
+                    </div>
+                    <div className="rounded-xl border border-slate-800/60 bg-slate-900/60 p-4 text-xs text-slate-400 space-y-2">
+                        <p className="font-semibold text-slate-200 uppercase tracking-wide">Telegram reminders</p>
+                        <p>Manual notification buttons live in the account drawer. Auto alerts fire when users update their own details.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // RENDER: Job Monitor Tab Content
+    // ─────────────────────────────────────────────────────────────────────────────
+    const renderJobMonitorTab = () => {
+        const jobTypeOptions = ["ohlcv_load", "signal_process"];
+        const jobStatusOptions = ["running", "completed", "failed", "stopped"];
+        const jobTriggeredOptions = ["auto", "manual"];
+
+        return (
+            <div className="space-y-6">
                 <section className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
                     <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                             <AlertTriangle className="h-5 w-5 text-yellow-400" />
                             <h3 className="text-lg font-semibold">Job Monitor</h3>
                         </div>
-                        <Button
-                            variant="secondary"
-                            className="bg-slate-800 hover:bg-slate-700 text-xs flex items-center gap-2"
-                            onClick={fetchJobs}
-                        >
-                            <RefreshCw className="h-4 w-4" />
-                            Refresh
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="ghost"
+                                className="text-xs text-slate-400 hover:text-white"
+                                onClick={handleResetJobFilters}
+                            >
+                                Reset Filters
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                className="bg-slate-800 hover:bg-slate-700 text-xs flex items-center gap-2"
+                                onClick={fetchJobs}
+                                disabled={jobsLoading}
+                            >
+                                <RefreshCw className={cn("h-4 w-4", jobsLoading && "animate-spin")} />
+                                Refresh
+                            </Button>
+                            {jobsLoading && <SimpleSpinner size={16} />}
+                        </div>
                     </div>
                     <div className="overflow-auto rounded-xl border border-slate-800">
                         <table className="min-w-full text-sm divide-y divide-slate-800">
                             <thead className="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-500">
                                 <tr>
-                                    <th className="px-4 py-3 text-left">Job</th>
+                                    <th className="px-4 py-3 text-left">Job ID</th>
                                     <th className="px-4 py-3 text-left">Type</th>
                                     <th className="px-4 py-3 text-left">Triggered</th>
                                     <th className="px-4 py-3 text-left">Status</th>
+                                    <th className="px-4 py-3 text-left">Date Range</th>
                                     <th className="px-4 py-3 text-left">Started</th>
                                     <th className="px-4 py-3 text-left">Finished</th>
                                     <th className="px-4 py-3 text-left">Actions</th>
                                 </tr>
+                                <tr className="bg-slate-950/40 text-[11px] text-slate-400 font-normal uppercase tracking-normal">
+                                    <th className="px-4 py-2">
+                                        <Input
+                                            type="text"
+                                            value={jobFilters.job_id}
+                                            onChange={(e) => handleJobFilterChange("job_id", e.target.value)}
+                                            placeholder="Job ID"
+                                            className="h-7 bg-slate-900/80 border-slate-800 text-[11px]"
+                                        />
+                                    </th>
+                                    <th className="px-4 py-2">
+                                        <select
+                                            value={jobFilters.job_type}
+                                            onChange={(e) => handleJobFilterChange("job_type", e.target.value)}
+                                            className="h-7 w-full rounded border border-slate-800 bg-slate-900/80 px-2 text-[11px] text-slate-200"
+                                        >
+                                            <option value="">All</option>
+                                            {jobTypeOptions.map((type) => (
+                                                <option key={type} value={type}>
+                                                    {type}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </th>
+                                    <th className="px-4 py-2">
+                                        <select
+                                            value={jobFilters.triggered_by}
+                                            onChange={(e) => handleJobFilterChange("triggered_by", e.target.value)}
+                                            className="h-7 w-full rounded border border-slate-800 bg-slate-900/80 px-2 text-[11px] text-slate-200"
+                                        >
+                                            <option value="">All</option>
+                                            {jobTriggeredOptions.map((option) => (
+                                                <option key={option} value={option}>
+                                                    {option}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </th>
+                                    <th className="px-4 py-2">
+                                        <select
+                                            value={jobFilters.status}
+                                            onChange={(e) => handleJobFilterChange("status", e.target.value)}
+                                            className="h-7 w-full rounded border border-slate-800 bg-slate-900/80 px-2 text-[11px] text-slate-200"
+                                        >
+                                            <option value="">All</option>
+                                            {jobStatusOptions.map((statusOption) => (
+                                                <option key={statusOption} value={statusOption}>
+                                                    {statusOption}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </th>
+                                    <th className="px-4 py-2" colSpan={2}>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="date"
+                                                value={jobFilters.start_date}
+                                                onChange={(e) => handleJobFilterChange("start_date", e.target.value)}
+                                                className="h-7 flex-1 rounded border border-slate-800 bg-slate-900/80 px-2 text-[11px] text-slate-200"
+                                                placeholder="Start Date"
+                                            />
+                                            <input
+                                                type="date"
+                                                value={jobFilters.end_date}
+                                                onChange={(e) => handleJobFilterChange("end_date", e.target.value)}
+                                                className="h-7 flex-1 rounded border border-slate-800 bg-slate-900/80 px-2 text-[11px] text-slate-200"
+                                                placeholder="End Date"
+                                            />
+                                        </div>
+                                    </th>
+                                    <th className="px-4 py-2 text-center text-[10px] text-slate-600">
+                                        <span>—</span>
+                                    </th>
+                                    <th className="px-4 py-2 text-center text-[10px] text-slate-600">—</th>
+                                </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-900">
-                                {jobs.slice(0, 12).map((job) => (
-                                    <tr key={job.id} className="hover:bg-slate-950/60">
-                                        <td className="px-4 py-3 text-slate-200 text-xs">
-                                            <p className="font-semibold">{jobMeta[job.job_type].title}</p>
-                                            <p className="text-[11px] text-slate-500">ID #{job.id}</p>
+                                {jobs.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={8} className="px-4 py-8 text-center text-xs text-slate-500">
+                                            {jobsLoading ? (
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <SimpleSpinner size={16} />
+                                                    <span>Loading jobs...</span>
+                                                </div>
+                                            ) : (
+                                                "No jobs found matching the selected filters."
+                                            )}
                                         </td>
-                                        <td className="px-4 py-3 text-xs text-slate-300">{job.job_type}</td>
-                                        <td className="px-4 py-3 text-xs text-slate-300">
-                                            {job.triggered_by === "auto" ? "Auto" : "Manual"}
-                                        </td>
-                                        <td className="px-4 py-3 text-xs">
-                                            <span
-                                                className={cn(
-                                                    "px-2 py-0.5 rounded-full text-[11px] font-semibold",
-                                                    job.status === "completed"
-                                                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-                                                        : job.status === "running"
+                                    </tr>
+                                ) : (
+                                    jobs.map((job) => (
+                                        <tr key={job.id} className="hover:bg-slate-950/60">
+                                            <td className="px-4 py-3 text-slate-200 text-xs font-semibold">
+                                                #{job.id}
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-slate-300">
+                                                <div>
+                                                    <p className="font-semibold">{jobMeta[job.job_type].title}</p>
+                                                    <p className="text-[11px] text-slate-500">{job.job_type}</p>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-slate-300">
+                                        {job.triggered_by === "auto" ? "Auto" : "Manual"}
+                                    </td>
+                                    <td className="px-4 py-3 text-xs">
+                                        <span
+                                            className={cn(
+                                                "px-2 py-0.5 rounded-full text-[11px] font-semibold",
+                                                job.status === "completed"
+                                                    ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                                                    : job.status === "running"
                                                         ? "bg-sky-500/15 text-sky-200 border border-sky-500/30"
                                                         : job.status === "stopped"
-                                                        ? "bg-yellow-500/15 text-yellow-200 border border-yellow-500/30"
-                                                        : "bg-rose-500/15 text-rose-200 border border-rose-500/30",
-                                                )}
-                                            >
-                                                {job.status}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 text-xs text-slate-400">
-                                            {job.started_at ? new Date(job.started_at).toLocaleString() : "—"}
-                                        </td>
-                                        <td className="px-4 py-3 text-xs text-slate-400">
-                                            {job.finished_at ? new Date(job.finished_at).toLocaleString() : "—"}
-                                        </td>
-                                        <td className="px-4 py-3 text-xs">
-                                            <div className="flex items-center gap-2">
-                                                {job.status === "running" && (
+                                                            ? "bg-yellow-500/15 text-yellow-200 border border-yellow-500/30"
+                                                            : "bg-rose-500/15 text-rose-200 border border-rose-500/30"
+                                            )}
+                                        >
+                                            {job.status}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-xs text-slate-400">
+                                        {job.started_at ? new Date(job.started_at).toLocaleString() : "—"}
+                                    </td>
+                                    <td className="px-4 py-3 text-xs text-slate-400">
+                                        {job.finished_at ? new Date(job.finished_at).toLocaleString() : "—"}
+                                    </td>
+                                    <td className="px-4 py-3 text-xs">
+                                        <div className="flex items-center gap-2">
+                                            {job.status === "running" && (
+                                                <>
                                                     <Button
                                                         variant="destructive"
                                                         size="icon"
                                                         className="bg-rose-600 hover:bg-rose-500"
                                                         onClick={() => handleStopJob(job.id)}
-                                                        disabled={stoppingJobId === job.id}
+                                                        disabled={stoppingJobId === job.id || forcingJobId === job.id}
                                                     >
-                                                        {stoppingJobId === job.id ? (
-                                                            <Loader2 className="h-3 w-3 animate-spin" />
-                                                        ) : (
-                                                            "■"
-                                                        )}
+                                                        {stoppingJobId === job.id ? <SimpleSpinner size={12} /> : "■"}
                                                     </Button>
-                                                )}
-                                                <Button
-                                                    variant="secondary"
-                                                    size="icon"
-                                                    className="bg-slate-900 hover:bg-slate-800"
-                                                    onClick={() => handleViewLog(job.id)}
-                                                >
-                                                    <Terminal className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                                {jobs.length === 0 && (
-                                    <tr>
-                                        <td
-                                            colSpan={7}
-                                            className="px-4 py-4 text-center text-xs text-slate-500"
-                                        >
-                                            No jobs have been run yet.
-                                        </td>
-                                    </tr>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="icon"
+                                                        className="border-amber-500/60 text-amber-300 hover:bg-amber-500/10"
+                                                        onClick={() => handleForceStopJob(job.id)}
+                                                        disabled={forcingJobId === job.id}
+                                                    >
+                                                        {forcingJobId === job.id ? <SimpleSpinner size={12} /> : "!"}
+                                                    </Button>
+                                                </>
+                                            )}
+                                            <Button
+                                                variant="secondary"
+                                                size="icon"
+                                                className="bg-slate-900 hover:bg-slate-800"
+                                                onClick={() => handleViewLog(job.id)}
+                                            >
+                                                <Terminal className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </td>
+                                        </tr>
+                                    ))
                                 )}
                             </tbody>
-                        </table>
-                    </div>
-                </section>
-                            </div>
+                    </table>
+                </div>
+            </section>
+            </div>
+        );
+    };
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // RENDER: Connections Tab Content
+    // ─────────────────────────────────────────────────────────────────────────────
+    const renderConnectionsTab = () => (
+        <div className="space-y-6">
+            <section className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Link2 className="h-5 w-5 text-cyan-400" />
+                        <h3 className="text-lg font-semibold">External Connections</h3>
+                    </div>
+                </div>
+                <p className="text-slate-500 text-sm">Configure external integrations, APIs, and data sources.</p>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                    {/* Placeholder cards for future connections */}
+                    <div className="rounded-xl border border-slate-800/70 bg-slate-950/60 p-4 space-y-2">
+                        <div className="flex items-center gap-2">
+                            <Database className="h-4 w-4 text-sky-400" />
+                            <span className="font-semibold text-white">Database</span>
+                        </div>
+                        <p className="text-xs text-slate-500">DuckDB connection for OHCLV and signals data.</p>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                            Connected
+                        </span>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800/70 bg-slate-950/60 p-4 space-y-2">
+                        <div className="flex items-center gap-2">
+                            <Send className="h-4 w-4 text-blue-400" />
+                            <span className="font-semibold text-white">Telegram Bot</span>
+                        </div>
+                        <p className="text-xs text-slate-500">Notifications and alerts via Telegram.</p>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                            Not Configured
+                        </span>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800/70 bg-slate-950/60 p-4 space-y-2">
+                        <div className="flex items-center gap-2">
+                            <Activity className="h-4 w-4 text-emerald-400" />
+                            <span className="font-semibold text-white">Market Data API</span>
+                        </div>
+                        <p className="text-xs text-slate-500">Yahoo Finance for real-time stock data.</p>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                            Active
+                        </span>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800/70 bg-slate-950/60 p-4 space-y-2 opacity-50">
+                        <div className="flex items-center gap-2">
+                            <Link2 className="h-4 w-4 text-slate-400" />
+                            <span className="font-semibold text-white">Add Connection</span>
+                        </div>
+                        <p className="text-xs text-slate-500">Configure additional integrations.</p>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                            Coming Soon
+                        </span>
+                    </div>
+                </div>
+            </section>
+        </div>
+    );
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // RENDER: Feedback Tab Content
+    // ─────────────────────────────────────────────────────────────────────────────
+    const renderFeedbackTab = () => (
+        <div className="space-y-6">
+            <section className="glass-panel rounded-2xl border border-slate-800 p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <MessageSquarePlus className="h-5 w-5 text-violet-400" />
+                        <h3 className="text-lg font-semibold">User Feedback & Requests</h3>
+                    </div>
+                    <Button
+                        variant="secondary"
+                        className="bg-slate-800 hover:bg-slate-700 text-xs"
+                        onClick={fetchFeedback}
+                    >
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                        Refresh
+                    </Button>
+                </div>
+                {feedbackList.length === 0 ? (
+                    <p className="text-slate-500 text-sm">No feedback submitted yet.</p>
+                ) : (
+                    <div className="space-y-3 max-h-[500px] overflow-auto pr-2">
+                        {feedbackList.map((fb) => {
+                            const typeIcon = fb.feedback_type === "feature_request" ? Lightbulb : fb.feedback_type === "bug_report" ? Bug : MessageSquarePlus;
+                            const TypeIcon = typeIcon;
+                            const typeColor = fb.feedback_type === "feature_request" ? "text-amber-400" : fb.feedback_type === "bug_report" ? "text-rose-400" : "text-sky-400";
+                            return (<div key={fb.id} className="rounded-xl border border-slate-800/70 bg-slate-950/60 p-4 space-y-2">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="flex items-center gap-2">
+                                        <TypeIcon className={cn("h-4 w-4", typeColor)} />
+                                        <span className="font-semibold text-white">{fb.title}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            value={fb.status}
+                                            onChange={(e) => handleUpdateFeedbackStatus(fb.id, e.target.value)}
+                                            disabled={updatingFeedbackId === fb.id}
+                                            className="text-[11px] bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-300"
+                                        >
+                                            <option value="pending">Pending</option>
+                                            <option value="reviewed">Reviewed</option>
+                                            <option value="in_progress">In Progress</option>
+                                            <option value="completed">Completed</option>
+                                            <option value="rejected">Rejected</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-slate-500">
+                                    {fb.user?.full_name || fb.user?.email || "Unknown"} • {fb.feedback_type.replace("_", " ")} • {new Date(fb.created_at).toLocaleDateString()}
+                                </p>
+                                {fb.description && (
+                                    <p className="text-sm text-slate-400">{fb.description}</p>
+                                )}
+                            </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </section>
+        </div>
+    );
+
+    return (
+        <div className="flex h-full bg-slate-900 text-white overflow-hidden">
+            {/* Left Navigation Panel */}
+            <aside className="w-64 flex-shrink-0 border-r border-slate-800 bg-slate-950/30 flex flex-col">
+                <div className="p-6 border-b border-slate-800/50">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-red-500/10 rounded-lg border border-red-500/30">
+                            <Shield className="h-6 w-6 text-red-400" />
+                        </div>
+                        <div>
+                            <h1 className="text-lg font-bold leading-none">Admin</h1>
+                            <p className="text-[10px] uppercase tracking-wider text-slate-500 mt-1">Console</p>
+                        </div>
+                    </div>
+                </div>
+
+                <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+                    {adminTabs.map((tab) => {
+                        const Icon = tab.icon;
+                        return (
+                            <button
+                                key={tab.key}
+                                onClick={() => setActiveTab(tab.key)}
+                                className={cn(
+                                    "w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all",
+                                    activeTab === tab.key
+                                        ? "bg-sky-500/10 text-sky-100 border border-sky-500/20"
+                                        : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border border-transparent"
+                                )}
+                            >
+                                <Icon className={cn("h-4 w-4 flex-shrink-0", activeTab === tab.key ? "text-sky-400" : "text-slate-500")} />
+                                <div>
+                                    <p className="font-medium text-sm">{tab.label}</p>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </nav>
+
+                <div className="p-4 border-t border-slate-800/50">
+                    <Button variant="outline" className="w-full justify-start gap-2 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800" onClick={fetchJobs}>
+                        <RefreshCw className="h-4 w-4" />
+                        Refresh Data
+                    </Button>
+                </div>
+            </aside>
+
+            {/* Content Area */}
+            <main className="flex-1 overflow-y-auto min-w-0 bg-slate-900">
+                <div className="p-8 max-w-7xl">
+                    <div className="mb-6">
+                        <h2 className="text-2xl font-bold">{adminTabs.find(t => t.key === activeTab)?.label}</h2>
+                        <p className="text-slate-400 text-sm">{adminTabs.find(t => t.key === activeTab)?.description}</p>
+                    </div>
+
+                    {activeTab === "processors" && renderProcessorsTab()}
+                    {activeTab === "job_monitor" && renderJobMonitorTab()}
+                    {activeTab === "accounts" && renderAccountsTab()}
+                    {activeTab === "feedback" && renderFeedbackTab()}
+                    {activeTab === "connections" && renderConnectionsTab()}
+                </div>
+            </main>
+
+            {/* Create User Drawer */}
             {showCreateDrawer && (
                 <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex justify-end z-50">
                     <div className="w-full max-w-lg bg-slate-900 h-full border-l border-slate-800 p-6 overflow-y-auto">
@@ -1032,7 +1600,7 @@ export default function AdminPage() {
                                         placeholder="+91 90000 00000"
                                     />
                                 </div>
-                                    <div>
+                                <div>
                                     <label className="text-xs uppercase text-slate-500">State</label>
                                     <Input
                                         value={createForm.state}
@@ -1040,8 +1608,8 @@ export default function AdminPage() {
                                         className="bg-slate-900/50 border-slate-800 mt-1"
                                         placeholder="Karnataka"
                                     />
-                                    </div>
                                 </div>
+                            </div>
                             <div>
                                 <label className="text-xs uppercase text-slate-500">Country</label>
                                 <Input
@@ -1056,7 +1624,7 @@ export default function AdminPage() {
                                     <label className="text-xs uppercase text-slate-500">City</label>
                                     <Input
                                         value={createForm.city}
-                                       onChange={(e) => setCreateForm((prev) => ({ ...prev, city: e.target.value }))}
+                                        onChange={(e) => setCreateForm((prev) => ({ ...prev, city: e.target.value }))}
                                         className="bg-slate-900/50 border-slate-800 mt-1"
                                         placeholder="Bengaluru"
                                     />
@@ -1081,14 +1649,15 @@ export default function AdminPage() {
                                 />
                             </div>
                             <Button type="submit" className="w-full bg-sky-500 hover:bg-sky-400 flex items-center justify-center gap-2" disabled={creatingUser}>
-                                {creatingUser ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                {creatingUser ? <SimpleSpinner size={16} /> : <Send className="h-4 w-4" />}
                                 Create User
                             </Button>
                         </form>
-                        </div>
                     </div>
+                </div>
             )}
 
+            {/* Log Viewer Modal */}
             {logViewer.open && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6">
                     <div className="w-full max-w-3xl bg-slate-950 border border-slate-800 rounded-2xl p-6">
@@ -1104,15 +1673,240 @@ export default function AdminPage() {
                         <div className="h-72 overflow-auto rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-xs font-mono text-slate-300">
                             {logViewer.loading ? (
                                 <div className="flex items-center justify-center h-full">
-                                    <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                                    <SimpleSpinner size={24} />
                                 </div>
                             ) : logViewer.error ? (
                                 <p className="text-rose-300">{logViewer.error}</p>
                             ) : (
                                 <pre className="whitespace-pre-wrap">{logViewer.content || "No log content."}</pre>
                             )}
+                        </div>
+                    </div>
                 </div>
-            </div>
+            )}
+
+            {/* Schedule Modal */}
+            {showScheduleModal && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6">
+                    <div className="w-full max-w-lg bg-slate-950 border border-slate-800 rounded-2xl p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 className="text-lg font-semibold">{editingSchedule ? "Edit Schedule" : "Create Schedule"}</h3>
+                                <p className="text-xs text-slate-500">Configure automatic OHCLV data loading</p>
+                            </div>
+                            <button className="text-slate-500 hover:text-white" onClick={() => setShowScheduleModal(false)}>
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs uppercase text-slate-500 mb-2 block">Schedule Type</label>
+                                <select
+                                    value={scheduleForm.schedule_type}
+                                    onChange={(e) => setScheduleForm({ ...scheduleForm, schedule_type: e.target.value as any })}
+                                    className="w-full rounded-md bg-slate-900/50 border border-slate-800 px-3 py-2 text-sm"
+                                >
+                                    <option value="daily">Daily (Repeats every day)</option>
+                                    <option value="weekly">Weekly (Repeats weekly)</option>
+                                    <option value="interval">Interval (Repeats every X hours/minutes)</option>
+                                    <option value="once">Once (Run one time only)</option>
+                                    <option value="date_range">Date Range (Repeats between dates)</option>
+                                </select>
+                            </div>
+
+                            {scheduleForm.schedule_type === "daily" && (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Hour</label>
+                                        <Input
+                                            type="number"
+                                            min="0"
+                                            max="23"
+                                            value={scheduleForm.hour}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, hour: parseInt(e.target.value) || 0 })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Minute</label>
+                                        <Input
+                                            type="number"
+                                            min="0"
+                                            max="59"
+                                            value={scheduleForm.minute}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, minute: parseInt(e.target.value) || 0 })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {scheduleForm.schedule_type === "weekly" && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Day of Week</label>
+                                        <select
+                                            value={scheduleForm.day_of_week}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, day_of_week: parseInt(e.target.value) })}
+                                            className="w-full rounded-md bg-slate-900/50 border border-slate-800 px-3 py-2 text-sm"
+                                        >
+                                            <option value="0">Monday</option>
+                                            <option value="1">Tuesday</option>
+                                            <option value="2">Wednesday</option>
+                                            <option value="3">Thursday</option>
+                                            <option value="4">Friday</option>
+                                            <option value="5">Saturday</option>
+                                            <option value="6">Sunday</option>
+                                        </select>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs uppercase text-slate-500 mb-2 block">Hour</label>
+                                            <Input
+                                                type="number"
+                                                min="0"
+                                                max="23"
+                                                value={scheduleForm.hour}
+                                                onChange={(e) => setScheduleForm({ ...scheduleForm, hour: parseInt(e.target.value) || 0 })}
+                                                className="bg-slate-900/50 border-slate-800"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs uppercase text-slate-500 mb-2 block">Minute</label>
+                                            <Input
+                                                type="number"
+                                                min="0"
+                                                max="59"
+                                                value={scheduleForm.minute}
+                                                onChange={(e) => setScheduleForm({ ...scheduleForm, minute: parseInt(e.target.value) || 0 })}
+                                                className="bg-slate-900/50 border-slate-800"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {scheduleForm.schedule_type === "interval" && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Repeat Every (Hours)</label>
+                                        <Input
+                                            type="number"
+                                            min="1"
+                                            value={scheduleForm.interval_hours}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, interval_hours: parseInt(e.target.value) || 1, interval_minutes: 0 })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                    <div className="text-center text-slate-400 text-xs">OR</div>
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Repeat Every (Minutes)</label>
+                                        <Input
+                                            type="number"
+                                            min="1"
+                                            value={scheduleForm.interval_minutes}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, interval_minutes: parseInt(e.target.value) || 30, interval_hours: 0 })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {scheduleForm.schedule_type === "once" && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Run Date</label>
+                                        <Input
+                                            type="date"
+                                            value={scheduleForm.start_date}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, start_date: e.target.value })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Run Time</label>
+                                        <Input
+                                            type="time"
+                                            value={scheduleForm.start_time}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, start_time: e.target.value })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {scheduleForm.schedule_type === "date_range" && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Start Date</label>
+                                        <Input
+                                            type="date"
+                                            value={scheduleForm.start_date}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, start_date: e.target.value })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Start Time</label>
+                                        <Input
+                                            type="time"
+                                            value={scheduleForm.start_time}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, start_time: e.target.value })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">End Date</label>
+                                        <Input
+                                            type="date"
+                                            value={scheduleForm.end_date}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, end_date: e.target.value })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">End Time</label>
+                                        <Input
+                                            type="time"
+                                            value={scheduleForm.end_time}
+                                            onChange={(e) => setScheduleForm({ ...scheduleForm, end_time: e.target.value })}
+                                            className="bg-slate-900/50 border-slate-800"
+                                        />
+                                    </div>
+                                    <div className="text-xs text-slate-400">
+                                        <p>Note: For date range, select interval type (daily/weekly/interval) to determine how often to repeat within the date range.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="is_active"
+                                    checked={scheduleForm.is_active}
+                                    onChange={(e) => setScheduleForm({ ...scheduleForm, is_active: e.target.checked })}
+                                    className="rounded border-slate-700 bg-slate-900"
+                                />
+                                <label htmlFor="is_active" className="text-sm text-slate-300">Active</label>
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                                <Button
+                                    variant="secondary"
+                                    className="flex-1"
+                                    onClick={() => setShowScheduleModal(false)}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    className="flex-1 bg-amber-600 hover:bg-amber-500"
+                                    onClick={handleCreateSchedule}
+                                >
+                                    {editingSchedule ? "Update" : "Create"} Schedule
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

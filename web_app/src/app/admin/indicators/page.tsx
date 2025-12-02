@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import api from "@/lib/api";
-import { Check, Edit3, Loader2, Plus, Trash2 } from "lucide-react";
+import { Check, Edit3, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
 import { RubikLoader } from "@/components/RubikLoader";
+import SimpleSpinner from "@/components/SimpleSpinner";
 
 type IndicatorConfig = {
   id: number;
@@ -28,7 +28,6 @@ type MessageState = { type: "success" | "error"; text: string } | null;
 
 export default function IndicatorAdminPage() {
   const router = useRouter();
-  const sidebarCollapsed = useSidebarCollapsed();
   const [accessLoading, setAccessLoading] = useState(true);
   const [rows, setRows] = useState<IndicatorConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -170,11 +169,7 @@ export default function IndicatorAdminPage() {
   }
 
   return (
-    <div
-      className={cn(
-        "min-h-screen bg-slate-900 text-white p-8 transition-all duration-300",
-        sidebarCollapsed ? "pl-24" : "pl-72",
-      )}
+    <div className="min-h-screen bg-slate-900 text-white p-8"
     >
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="flex items-start justify-between border-b border-slate-800 pb-4 gap-4">
@@ -194,7 +189,7 @@ export default function IndicatorAdminPage() {
               onClick={loadIndicators}
               disabled={loading}
             >
-              <Loader2 className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
+              <SimpleSpinner size={16} className={cn("mr-1", loading ? "" : "opacity-0")} />
               Refresh
             </Button>
             <Button
@@ -335,7 +330,7 @@ export default function IndicatorAdminPage() {
               onClick={handleAddRow}
               disabled={creating}
             >
-              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              {creating ? <SimpleSpinner size={16} /> : <Plus className="h-4 w-4" />}
               Add
             </Button>
           </div>
@@ -374,7 +369,7 @@ export default function IndicatorAdminPage() {
               {loading ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
-                    <Loader2 className="h-4 w-4 animate-spin inline mr-2" />
+                    <SimpleSpinner size={16} className="mr-2 inline-block" />
                     Loading indicators...
                   </td>
                 </tr>
@@ -479,7 +474,7 @@ export default function IndicatorAdminPage() {
                           onClick={() => handleSaveRow(row)}
                         >
                           {savingId === row.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <SimpleSpinner size={12} />
                           ) : (
                             <Check className="h-3 w-3" />
                           )}
@@ -492,7 +487,7 @@ export default function IndicatorAdminPage() {
                           onClick={() => handleDeleteRow(row.id)}
                         >
                           {deletingId === row.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <SimpleSpinner size={12} />
                           ) : (
                             <Trash2 className="h-3 w-3" />
                           )}

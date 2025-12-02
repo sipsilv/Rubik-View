@@ -13,6 +13,9 @@ if USE_EXCEL:
 else:
     xw = None  # type: ignore
 
+# Lightweight "fast mode" for backend runs – limits history and symbol universe
+FAST_MODE = os.getenv("RUBIKVIEW_FAST_MODE") == "1"
+
 # ===== CONFIG =====
 
 # Step 1: Find Rubik_view (project root) automatically by traversing up
@@ -28,9 +31,17 @@ PROJECT_ROOT = find_project_root()  # This will always point to your Rubik_view 
 # Now define all your paths relative to this
 DB_PATH = PROJECT_ROOT / "Data" / "OHCLV Data" / "stocks.duckdb"
 YEARS_BACK = 6
+if FAST_MODE:
+    # Use a shorter history window when running from the backend to reduce API
+    # calls for the first full run. Subsequent runs still only fetch missing days.
+    YEARS_BACK = 3
 START_DATE = date.today() - timedelta(days=YEARS_BACK * 365)
 YESTERDAY = date.today() - timedelta(days=1)
 MAX_WORKERS = 20
+if FAST_MODE:
+    # Slightly fewer concurrent workers to avoid API throttling and improve
+    # overall throughput in shared environments.
+    MAX_WORKERS = 12
 
 EXCEL_PATH = PROJECT_ROOT / "rubikview.xlsm"
 EXCEL_SHEET = "Update Dash board"
@@ -64,6 +75,9 @@ def load_symbols():
     bse = conn.execute("SELECT DISTINCT SYMBOL_NAME FROM BSE_Master_Cleaned WHERE SYMBOL_NAME IS NOT NULL").fetchdf()
     bse_syms = (bse['SYMBOL_NAME'].astype(str).str.strip() + ".BO").drop_duplicates()
     all_syms = pd.concat([nse_syms, bse_syms]).dropna().unique().tolist()
+    # In fast mode, only process a smaller, deterministic subset for quicker runs.
+    if FAST_MODE:
+        all_syms = all_syms[:500]
     conn.close()
     return all_syms
 
@@ -201,7 +215,7 @@ def main():
                 processed += 1
                 if status_flag == "success":
                     success += 1
-                    status = f"+{count} rows ({first_dt}→{last_dt})"
+                    status = f"+{count} rows ({first_dt}->{last_dt})"
                 elif status_flag == "skipped":
                     skipped += 1
                     status = "skipped"
@@ -213,7 +227,7 @@ def main():
             except Exception as e:
                 failed += 1
                 status = f"FAILED: {e}"
-            print(f"{idx}/{total} ({percent:.1f}%): {sym} → {status}")
+            print(f"{idx}/{total} ({percent:.1f}%): {sym} -> {status}")
             if idx % 10 == 0 or idx == total:
                 write_progress_to_excel(
                     idx, total, f"{idx}/{total}", success, failed, skipped, uptodate, processed, today_str
@@ -221,7 +235,7 @@ def main():
     write_progress_to_excel(
         total, total, f"{total}/{total}", success, failed, skipped, uptodate, processed, today_str
     )
-    print("\n✅ Ultra-fast parallel update complete.")
+    print("\n[OK] Ultra-fast parallel update complete.")
 
 if __name__ == "__main__":
     main()
