@@ -2,7 +2,84 @@
 
 A full-stack stock trading platform with real-time data processing, indicator calculations, and AI-powered stock analysis.
 
-## Project Structure
+## 🚀 Quick Start Guide
+
+### Prerequisites
+
+- **Python 3.8+** (for backend)
+- **Node.js 18+** (for frontend)
+- **npm** or **yarn** (for frontend)
+
+### Installation
+
+#### 1. Install Backend Dependencies
+
+```powershell
+cd backend
+pip install -r requirements.txt
+```
+
+#### 2. Install Frontend Dependencies
+
+```powershell
+cd web_app
+npm install
+```
+
+### Running the Project
+
+You need **TWO terminals** - one for backend, one for frontend.
+
+#### Terminal 1: Start Backend Server
+
+**⚠️ IMPORTANT:** Run from the **PROJECT ROOT** directory (not inside backend folder)
+
+```powershell
+# From project root (where README.md is located):
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**OR use the startup scripts:**
+- Double-click `START_BACKEND.bat` in project root (easiest way!)
+- Double-click `START_FRONTEND.bat` in project root for frontend
+
+**You should see:**
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000
+INFO:     Application startup complete.
+```
+
+> **Note:** The command is `backend.main:app` (with `backend.` prefix) when running from project root!
+
+#### Terminal 2: Start Frontend Server
+
+```powershell
+cd web_app
+npm run dev
+```
+
+**You should see:**
+```
+▲ Next.js 16.0.6
+- Local:        http://localhost:3000
+```
+
+### Access the Application
+
+1. Open your browser: **http://localhost:3000**
+2. Login with:
+   - **Email:** `jallusandeep@rubikview.com`
+   - **Password:** `8686504620SAn@#1`
+
+### Verify Servers are Running
+
+- **Backend:** http://localhost:8000/health (should show `{"status":"healthy"}`)
+- **Frontend:** http://localhost:3000 (should show login page)
+- **API Docs:** http://localhost:8000/docs
+
+---
+
+## 📁 Project Structure
 
 ```
 Rubik_view/
@@ -12,215 +89,119 @@ Rubik_view/
 └── Data/             # All data files (databases, CSV files, etc.)
 ```
 
-## Prerequisites
+---
 
-Before running the project, make sure you have installed:
+## 🔧 Troubleshooting
 
-- **Python 3.8+** (for backend)
-- **Node.js 18+** (for frontend)
-- **npm** or **yarn** (for frontend package management)
+### Backend won't start
 
-## Installation & Setup
+1. **Check you're in the right directory:**
+   - Must be in **project root** (folder containing `backend` and `web_app`)
+   - NOT inside the `backend` folder
 
-
-Summary
-Files to run:
-Backend: backend/main.py (via uvicorn command)
-Frontend: web_app directory (via npm run dev)
-Commands:
-Backend: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-Frontend: npm run dev
-
-### 1. Backend Setup
-
-1. Navigate to the backend directory:
-   ```bash
+2. **Check dependencies:**
+   ```powershell
    cd backend
-   ```
-
-2. Install Python dependencies:
-   ```bash
    pip install -r requirements.txt
    ```
 
-   Or if you're using a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
+3. **Check port 8000 is free:**
+   ```powershell
+   netstat -ano | findstr :8000
    ```
+   If something is using it, kill that process or change the port
 
-### 2. Frontend Setup
+4. **Check database exists:**
+   - Database path: `Data/rubikview_users.db`
+   - It will be created automatically on first run
 
-1. Navigate to the web_app directory:
-   ```bash
+### Frontend won't start
+
+1. **Install dependencies:**
+   ```powershell
    cd web_app
-   ```
-
-2. Install Node.js dependencies:
-   ```bash
    npm install
    ```
 
-   Or using yarn:
-   ```bash
-   yarn install
+2. **Check port 3000 is free**
+
+3. **Clear cache:**
+   ```powershell
+   Remove-Item -Recurse -Force web_app\.next
    ```
 
-## Running the Project
+### Can't connect backend to frontend
 
-You need to run **both** the backend and frontend servers in separate terminals.
+1. Make sure backend is running: http://localhost:8000/health
+2. Check browser console for errors
+3. Verify API URL in `web_app/src/lib/api.ts` is `http://localhost:8000/api/v1`
 
-### Terminal 1: Start Backend Server
+---
 
-From the project root directory:
+## 📊 Server Information
 
-```bash
-cd backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
+| Component | Port | URL | Status Check |
+|-----------|------|-----|--------------|
+| Backend   | 8000 | http://localhost:8000 | http://localhost:8000/health |
+| Frontend  | 3000 | http://localhost:3000 | http://localhost:3000 |
+| API Docs  | 8000 | http://localhost:8000/docs | - |
 
-The backend will start on: **http://localhost:8000**
+---
 
-- API Documentation: http://localhost:8000/docs
-- Health Check: http://localhost:8000/health
+## 💾 Data Storage
 
-### Terminal 2: Start Frontend Server
-
-From the project root directory:
-
-```bash
-cd web_app
-npm run dev
-```
-
-The frontend will start on: **http://localhost:3000**
-
-Open your browser and navigate to: **http://localhost:3000**
-
-## Default Login Credentials
-
-**Super Admin:**
-- Email: `jallusandeep@rubikview.com`
-- Password: `8686504620SAn@#1`
-
-## Quick Start Commands
-
-### Windows (PowerShell)
-
-**Terminal 1 - Backend:**
-```powershell
-cd backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**Terminal 2 - Frontend:**
-```powershell
-cd web_app
-npm run dev
-```
-
-### Linux/Mac
-
-**Terminal 1 - Backend:**
-```bash
-cd backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**Terminal 2 - Frontend:**
-```bash
-cd web_app
-npm run dev
-```
-
-## Project Components
-
-### Backend (FastAPI)
-- **Port:** 8000
-- **Main File:** `backend/main.py`
-- **API Base URL:** `http://localhost:8000/api/v1`
-- **Features:**
-  - User authentication (JWT tokens)
-  - Stock data management
-  - Indicator configuration
-  - Job scheduling (OHCLV loading, Signal processing)
-  - Admin console APIs
-
-### Frontend (Next.js)
-- **Port:** 3000
-- **Main Directory:** `web_app/src/`
-- **Features:**
-  - User login/registration
-  - Dashboard with stock analysis
-  - Admin console
-  - Real-time job monitoring
-  - Indicator configuration UI
-
-### Data Storage
 - **User Database:** `Data/rubikview_users.db` (SQLite)
 - **OHCLV Data:** `Data/OHCLV Data/stocks.duckdb` (DuckDB)
 - **Signals Data:** `Data/Signals Data/signals.duckdb` (DuckDB)
 - **Symbols Data:** `Data/Symbols Data/symbols.duckdb` (DuckDB)
 - **Logs Database:** `Data/logs.db` (SQLite)
 
-## Troubleshooting
+---
 
-### Backend won't start
-- Make sure all Python dependencies are installed: `pip install -r backend/requirements.txt`
-- Check if port 8000 is already in use
-- Verify the database file exists: `Data/rubikview_users.db`
+## 🎯 Features
 
-### Frontend won't start
-- Make sure Node.js dependencies are installed: `npm install` in `web_app/` directory
-- Check if port 3000 is already in use
-- Clear Next.js cache: `rm -rf web_app/.next` (Linux/Mac) or `Remove-Item -Recurse -Force web_app\.next` (Windows)
+- User authentication (JWT tokens)
+- Real-time stock data processing
+- Indicator configuration and management
+- Job scheduling (OHCLV loading, Signal processing)
+- Admin console with job monitoring
+- Dashboard with stock analysis
+- AI-powered stock predictions
 
-### Database errors
-- The database will be created automatically on first run
-- Make sure the `Data/` folder exists
-- Check file permissions on the database file
+---
 
-### Connection errors between frontend and backend
-- Ensure backend is running on port 8000
-- Check CORS settings in `backend/main.py`
-- Verify the API base URL in `web_app/src/lib/api.ts` is correct
+## 📝 Important Notes
 
-## Development
+- **Keep both terminal windows open** while using the app
+- Backend must start **before** frontend
+- Database and tables are created automatically on first run
+- Super admin user is created automatically if it doesn't exist
+- Job scheduler initializes on backend startup
+
+---
+
+## 🔐 Default Credentials
+
+- **Email:** `jallusandeep@rubikview.com`
+- **Password:** `8686504620SAn@#1`
+- **Role:** Super Admin
+
+---
+
+## 🛠️ Development
 
 ### Backend Development
-- Backend uses hot-reload with `--reload` flag
-- Changes to Python files will automatically restart the server
-- API documentation available at `/docs` when server is running
+- Uses hot-reload with `--reload` flag
+- Changes automatically restart the server
+- API documentation at `/docs`
 
 ### Frontend Development
-- Frontend uses Next.js hot-reload
-- Changes to React/TypeScript files will automatically update in browser
-- Check browser console for any errors
+- Next.js hot-reload enabled
+- Changes automatically update in browser
+- Check browser console for errors
 
-## Production Deployment
+---
 
-### Backend
-```bash
-cd backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
-```
+## 📞 Support
 
-### Frontend
-```bash
-cd web_app
-npm run build
-npm start
-```
-
-## Additional Notes
-
-- The backend automatically creates database tables on startup
-- Super admin user is created automatically if it doesn't exist
-- Job scheduler is initialized on backend startup
-- All data files are stored in the `Data/` folder
-
-## Support
-
-For issues or questions, please check the project repository or contact the development team.
-
+For issues or questions, check the project repository or contact the development team.
