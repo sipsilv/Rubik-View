@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
 import SimpleSpinner from "@/components/SimpleSpinner";
+import { useInactivityTimer } from "@/hooks/useInactivityTimer";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -20,6 +21,11 @@ export function AppLayout({ children }: AppLayoutProps) {
 
     // Don't show sidebar on login page
     const isLoginPage = pathname === "/";
+
+    // Initialize inactivity timer for protected pages
+    // This will handle session expiry and inactivity logout
+    // The hook will check internally if user is authenticated
+    useInactivityTimer();
 
     if (isLoginPage) {
         return <>{children}</>;

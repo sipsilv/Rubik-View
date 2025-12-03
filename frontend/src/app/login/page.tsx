@@ -34,6 +34,7 @@ export default function LoginPage() {
 
       localStorage.setItem("token", response.data.access_token);
       localStorage.setItem("role", response.data.role);
+      localStorage.setItem("loginTimestamp", Date.now().toString());
 
       document.cookie = `token=${response.data.access_token}; path=/;`;
       router.push("/dashboard");

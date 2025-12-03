@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 import RubikCube from "@/components/RubikCube";
+import { useInactivityTimer } from "@/hooks/useInactivityTimer";
 
 // Read initial state synchronously to prevent flash
 const getInitialCollapsed = (): boolean => {
@@ -33,6 +34,7 @@ const Sidebar = () => {
     const [role, setRole] = useState<string | null>(null);
     const [collapsed, setCollapsed] = useState(getInitialCollapsed);
     const [mounted, setMounted] = useState(false);
+    const { formattedTimeRemaining, showCountdown } = useInactivityTimer();
 
     useEffect(() => {
         setMounted(true);
@@ -151,19 +153,34 @@ const Sidebar = () => {
             </nav>
 
             {/* Sign Out */}
-            <div className="mt-auto pt-2 border-t border-slate-800/50">
+            <div className="mt-auto pt-2 border-t border-slate-800/50 relative">
                 <button
                     onClick={() => {
                         import("@/lib/auth").then(({ logout }) => logout());
                     }}
                     className={cn(
                         "flex w-full items-center gap-2 rounded-lg border border-slate-800/40 px-2 py-1.5 text-[12px] font-medium text-slate-400 transition-all hover:bg-rose-500/10 hover:border-rose-500/40 hover:text-rose-300",
-                        collapsed && "justify-center px-1.5"
+                        collapsed && "justify-center px-1.5",
+                        showCountdown && "border-amber-500/40 hover:border-amber-500/60"
                     )}
-                    title={collapsed ? "Sign Out" : undefined}
+                    title={collapsed ? (showCountdown ? `Sign Out (${formattedTimeRemaining})` : "Sign Out") : undefined}
                 >
                     <LogOut className="h-[16px] w-[16px] flex-shrink-0" />
-                    {!collapsed && <span>Sign Out</span>}
+                    {!collapsed && (
+                        <div className="flex items-center justify-between w-full gap-2">
+                            <span>Sign Out</span>
+                            {showCountdown && formattedTimeRemaining && (
+                                <span className="text-amber-400 font-mono text-[11px] font-semibold ml-auto px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 animate-pulse">
+                                    {formattedTimeRemaining}
+                                </span>
+                            )}
+                        </div>
+                    )}
+                    {collapsed && showCountdown && formattedTimeRemaining && (
+                        <span className="absolute -top-1 -right-1 text-amber-400 font-mono text-[9px] font-semibold px-1 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 animate-pulse">
+                            {formattedTimeRemaining}
+                        </span>
+                    )}
                 </button>
             </div>
         </aside>

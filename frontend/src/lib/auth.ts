@@ -9,6 +9,7 @@ export function logout(): void {
   // Clear localStorage
   localStorage.removeItem("token");
   localStorage.removeItem("role");
+  localStorage.removeItem("loginTimestamp");
   
   // Clear all cookies (including token cookie)
   document.cookie.split(";").forEach((c) => {
