@@ -21,15 +21,16 @@ else:
 FAST_MODE = os.getenv("RUBIKVIEW_FAST_MODE") == "1"
 
 # === Dynamic Path Setup ===
-def find_project_root(marker="rubikview.xlsm"):
+def find_project_root():
+    """Find project root by looking for Data or backend folder"""
     curr = Path(__file__).resolve()
     for parent in [curr.parent] + list(curr.parents):
-        if (parent / marker).exists():
+        if (parent / "Data").exists() and (parent / "backend").exists():
             return parent
-    raise FileNotFoundError(f"Could not find {marker} in any parent directory of {curr}")
+    raise FileNotFoundError(f"Could not find project root (Data/backend folders) in any parent directory of {curr}")
 
 ROOT = find_project_root()
-EXCEL_FILE = ROOT / "rubikview.xlsm"
+EXCEL_FILE = ROOT / "rubikview.xlsm"  # Only used if Excel mode is enabled
 INDICATOR_SHEET = "Indicators"
 OHLCV_DB = ROOT / "Data" / "OHCLV Data" / "stocks.duckdb"
 SIGNALS_DB = ROOT / "Data" / "Signals Data" / "signals.duckdb"

@@ -1,2 +1,63 @@
 # Ignore all files in the OHCLV Data directory
 Data/OHCLV Data/**
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/*.log
+
+# Database files (local development)
+*.db
+*.sqlite
+*.sqlite3
+
+# Excel files
+*.xlsm
+*.xlsx
+
+# Jupyter notebooks
+*.ipynb
+
+# Documentation
+*.docx
+
+# Test files
+test*.py
+check*.py
+verify*.py
+examine*.py
+fix*.py
+
+# Migration scripts (one-time use)
+migrate*.py
+
+# Node modules
+node_modules/
+.next/
+out/
+dist/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
