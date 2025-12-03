@@ -6,8 +6,8 @@ echo.
 
 cd /d "%~dp0"
 
-echo Navigating to web_app directory...
-cd web_app
+echo Navigating to frontend directory...
+cd frontend
 
 echo.
 echo Starting frontend server on http://localhost:3000...
