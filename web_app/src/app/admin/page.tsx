@@ -300,14 +300,47 @@ export default function AdminPage() {
             let scheduleValue: any = {};
             
             if (scheduleForm.schedule_type === "daily") {
+                // Validate daily schedule
+                if (scheduleForm.hour < 0 || scheduleForm.hour > 23) {
+                    alert("Hour must be between 0 and 23 for daily schedule");
+                    return;
+                }
+                if (scheduleForm.minute < 0 || scheduleForm.minute > 59) {
+                    alert("Minute must be between 0 and 59");
+                    return;
+                }
                 scheduleValue = { hour: scheduleForm.hour, minute: scheduleForm.minute };
             } else if (scheduleForm.schedule_type === "weekly") {
+                // Validate weekly schedule
+                if (scheduleForm.hour < 0 || scheduleForm.hour > 23) {
+                    alert("Hour must be between 0 and 23 for weekly schedule");
+                    return;
+                }
+                if (scheduleForm.minute < 0 || scheduleForm.minute > 59) {
+                    alert("Minute must be between 0 and 59");
+                    return;
+                }
+                if (scheduleForm.day_of_week < 0 || scheduleForm.day_of_week > 6) {
+                    alert("Invalid day of week selected");
+                    return;
+                }
                 scheduleValue = { day_of_week: scheduleForm.day_of_week, hour: scheduleForm.hour, minute: scheduleForm.minute };
             } else if (scheduleForm.schedule_type === "interval") {
                 if (scheduleForm.interval_hours > 0) {
+                    if (scheduleForm.interval_hours < 1 || scheduleForm.interval_hours > 8760) {
+                        alert("Hours must be between 1 and 8760 (1 year)");
+                        return;
+                    }
                     scheduleValue = { hours: scheduleForm.interval_hours };
-                } else {
+                } else if (scheduleForm.interval_minutes > 0) {
+                    if (scheduleForm.interval_minutes < 1 || scheduleForm.interval_minutes > 59) {
+                        alert("Minutes must be between 1 and 59. Use hours for longer intervals.");
+                        return;
+                    }
                     scheduleValue = { minutes: scheduleForm.interval_minutes };
+                } else {
+                    alert("Please select an interval time (hours or minutes)");
+                    return;
                 }
             } else if (scheduleForm.schedule_type === "once") {
                 scheduleValue = { start_date: scheduleForm.start_date, start_time: scheduleForm.start_time };
@@ -334,22 +367,7 @@ export default function AdminPage() {
             }
 
             fetchSchedules();
-            setShowScheduleModal(false);
-            setEditingSchedule(null);
-            setScheduleForm({
-                job_type: "ohlcv_load",
-                schedule_type: "daily",
-                hour: 9,
-                minute: 0,
-                day_of_week: 0,
-                interval_hours: 6,
-                interval_minutes: 30,
-                start_date: "",
-                start_time: "09:00",
-                end_date: "",
-                end_time: "17:00",
-                is_active: true,
-            });
+            handleCancelSchedule();
         } catch (error) {
             console.error("Failed to save schedule", error);
         }
@@ -363,6 +381,25 @@ export default function AdminPage() {
         } catch (error) {
             console.error("Failed to delete schedule", error);
         }
+    };
+
+    const handleCancelSchedule = () => {
+        setShowScheduleModal(false);
+        setEditingSchedule(null);
+        setScheduleForm({
+            job_type: "ohlcv_load",
+            schedule_type: "daily",
+            hour: 9,
+            minute: 0,
+            day_of_week: 0,
+            interval_hours: 6,
+            interval_minutes: 30,
+            start_date: "",
+            start_time: "09:00",
+            end_date: "",
+            end_time: "17:00",
+            is_active: true,
+        });
     };
 
     const handleEditSchedule = (schedule: ScheduleItem) => {
@@ -457,6 +494,19 @@ export default function AdminPage() {
             fetchJobs();
         }
     }, [jobFilters]);
+
+    // Handle Escape key for schedule modal
+    useEffect(() => {
+        if (!showScheduleModal) return;
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                handleCancelSchedule();
+            }
+        };
+        document.addEventListener("keydown", handleEscape);
+        return () => document.removeEventListener("keydown", handleEscape);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showScheduleModal]);
 
     const latestJobs = useMemo(() => {
         const map: Record<string, AdminJob | undefined> = {};
@@ -772,14 +822,14 @@ export default function AdminPage() {
                             )}
                         </div>
                     </div>
-                    {schedules.filter(s => s.job_type === "ohlcv_load" && s.is_active).length > 0 && (
-                        <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px]">
-                            <div className="flex items-center gap-2 mb-1">
+                    {schedules.filter(s => s.job_type === "ohlcv_load").length > 0 && (
+                        <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] space-y-2">
+                            <div className="flex items-center gap-2 mb-2">
                                 <Clock className="h-3 w-3 text-amber-400" />
-                                <span className="font-semibold text-amber-300">Scheduled:</span>
+                                <span className="font-semibold text-amber-300">Scheduled Times:</span>
                             </div>
                             {schedules
-                                .filter(s => s.job_type === "ohlcv_load" && s.is_active)
+                                .filter(s => s.job_type === "ohlcv_load")
                                 .map((schedule) => {
                                     const value = JSON.parse(schedule.schedule_value);
                                     let scheduleText = "";
@@ -805,13 +855,47 @@ export default function AdminPage() {
                                         }
                                     }
                                     return (
-                                        <div key={schedule.id} className="flex items-center justify-between text-amber-200/80">
-                                            <span>{scheduleText}</span>
-                                            {schedule.next_run_at && (
-                                                <span className="text-amber-300/60">
-                                                    Next: {new Date(schedule.next_run_at).toLocaleString()}
+                                        <div key={schedule.id} className="flex items-center justify-between p-2 rounded-md bg-slate-900/30 border border-slate-800/50 gap-2">
+                                            <div className="flex items-center gap-2 flex-1">
+                                                <span className={cn(
+                                                    "w-2 h-2 rounded-full flex-shrink-0",
+                                                    schedule.is_active ? "bg-emerald-400" : "bg-slate-500"
+                                                )}></span>
+                                                <span className={schedule.is_active ? "text-amber-200/90" : "text-slate-500"}>
+                                                    {scheduleText}
                                                 </span>
-                                            )}
+                                                <span className={cn(
+                                                    "px-1.5 py-0.5 rounded text-[10px] font-semibold",
+                                                    schedule.is_active 
+                                                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                                        : "bg-slate-700/50 text-slate-500 border border-slate-700"
+                                                )}>
+                                                    {schedule.is_active ? "ACTIVE" : "INACTIVE"}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                {schedule.next_run_at && schedule.is_active && (
+                                                    <span className="text-amber-300/60 text-[10px] whitespace-nowrap">
+                                                        Next: {new Date(schedule.next_run_at).toLocaleString()}
+                                                    </span>
+                                                )}
+                                                <button
+                                                    onClick={() => handleEditSchedule(schedule)}
+                                                    className="px-2 py-1 text-xs bg-slate-800/50 hover:bg-amber-600/20 text-slate-400 hover:text-amber-300 rounded transition-colors border border-slate-700 hover:border-amber-500/30"
+                                                    title="Edit Schedule"
+                                                >
+                                                    <Edit className="h-3 w-3 inline mr-1" />
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteSchedule(schedule.id)}
+                                                    className="px-2 py-1 text-xs bg-slate-800/50 hover:bg-rose-600/20 text-slate-400 hover:text-rose-300 rounded transition-colors border border-slate-700 hover:border-rose-500/30"
+                                                    title="Cancel/Delete Schedule"
+                                                >
+                                                    <Trash2 className="h-3 w-3 inline mr-1" />
+                                                    Cancel
+                                                </button>
+                                            </div>
                                         </div>
                                     );
                                 })}
@@ -1687,14 +1771,21 @@ export default function AdminPage() {
 
             {/* Schedule Modal */}
             {showScheduleModal && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6">
+                <div 
+                    className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6"
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget) {
+                            handleCancelSchedule();
+                        }
+                    }}
+                >
                     <div className="w-full max-w-lg bg-slate-950 border border-slate-800 rounded-2xl p-6">
                         <div className="flex items-center justify-between mb-4">
                             <div>
                                 <h3 className="text-lg font-semibold">{editingSchedule ? "Edit Schedule" : "Create Schedule"}</h3>
                                 <p className="text-xs text-slate-500">Configure automatic OHCLV data loading</p>
                             </div>
-                            <button className="text-slate-500 hover:text-white" onClick={() => setShowScheduleModal(false)}>
+                            <button className="text-slate-500 hover:text-white" onClick={handleCancelSchedule}>
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
@@ -1715,34 +1806,72 @@ export default function AdminPage() {
                             </div>
 
                             {scheduleForm.schedule_type === "daily" && (
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Hour</label>
-                                        <Input
-                                            type="number"
-                                            min="0"
-                                            max="23"
-                                            value={scheduleForm.hour}
-                                            onChange={(e) => setScheduleForm({ ...scheduleForm, hour: parseInt(e.target.value) || 0 })}
-                                            className="bg-slate-900/50 border-slate-800"
-                                        />
+                                <div className="space-y-4">
+                                    <div className="rounded-md bg-amber-500/10 border border-amber-500/30 p-3">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Clock className="h-4 w-4 text-amber-400" />
+                                            <span className="text-xs font-medium text-amber-200">Daily Schedule</span>
+                                        </div>
+                                        <p className="text-xs text-amber-200/70">Job will run every day at the specified time</p>
                                     </div>
-                                    <div>
-                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Minute</label>
-                                        <Input
-                                            type="number"
-                                            min="0"
-                                            max="59"
-                                            value={scheduleForm.minute}
-                                            onChange={(e) => setScheduleForm({ ...scheduleForm, minute: parseInt(e.target.value) || 0 })}
-                                            className="bg-slate-900/50 border-slate-800"
-                                        />
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs uppercase text-slate-500 mb-2 block">Hour (0-23)</label>
+                                            <Input
+                                                type="number"
+                                                min="0"
+                                                max="23"
+                                                value={scheduleForm.hour}
+                                                onChange={(e) => {
+                                                    const val = parseInt(e.target.value) || 0;
+                                                    const clampedVal = Math.max(0, Math.min(23, val));
+                                                    setScheduleForm({ ...scheduleForm, hour: clampedVal });
+                                                }}
+                                                className="bg-slate-900/50 border-slate-800"
+                                                placeholder="0-23"
+                                            />
+                                            {(scheduleForm.hour < 0 || scheduleForm.hour > 23) && (
+                                                <p className="text-xs text-rose-400 mt-1">Hour must be between 0-23</p>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <label className="text-xs uppercase text-slate-500 mb-2 block">Minute (0-59)</label>
+                                            <Input
+                                                type="number"
+                                                min="0"
+                                                max="59"
+                                                value={scheduleForm.minute}
+                                                onChange={(e) => {
+                                                    const val = parseInt(e.target.value) || 0;
+                                                    const clampedVal = Math.max(0, Math.min(59, val));
+                                                    setScheduleForm({ ...scheduleForm, minute: clampedVal });
+                                                }}
+                                                className="bg-slate-900/50 border-slate-800"
+                                                placeholder="0-59"
+                                            />
+                                            {(scheduleForm.minute < 0 || scheduleForm.minute > 59) && (
+                                                <p className="text-xs text-rose-400 mt-1">Minute must be between 0-59</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-md bg-slate-800/50 border border-slate-700 p-2">
+                                        <p className="text-xs text-slate-400">
+                                            <span className="text-amber-300 font-medium">Selected time:</span>{" "}
+                                            {String(scheduleForm.hour).padStart(2, "0")}:{String(scheduleForm.minute).padStart(2, "0")}
+                                        </p>
                                     </div>
                                 </div>
                             )}
 
                             {scheduleForm.schedule_type === "weekly" && (
                                 <div className="space-y-4">
+                                    <div className="rounded-md bg-amber-500/10 border border-amber-500/30 p-3">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Clock className="h-4 w-4 text-amber-400" />
+                                            <span className="text-xs font-medium text-amber-200">Weekly Schedule</span>
+                                        </div>
+                                        <p className="text-xs text-amber-200/70">Job will run once per week on the selected day and time</p>
+                                    </div>
                                     <div>
                                         <label className="text-xs uppercase text-slate-500 mb-2 block">Day of Week</label>
                                         <select
@@ -1761,27 +1890,50 @@ export default function AdminPage() {
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="text-xs uppercase text-slate-500 mb-2 block">Hour</label>
+                                            <label className="text-xs uppercase text-slate-500 mb-2 block">Hour (0-23)</label>
                                             <Input
                                                 type="number"
                                                 min="0"
                                                 max="23"
                                                 value={scheduleForm.hour}
-                                                onChange={(e) => setScheduleForm({ ...scheduleForm, hour: parseInt(e.target.value) || 0 })}
+                                                onChange={(e) => {
+                                                    const val = parseInt(e.target.value) || 0;
+                                                    const clampedVal = Math.max(0, Math.min(23, val));
+                                                    setScheduleForm({ ...scheduleForm, hour: clampedVal });
+                                                }}
                                                 className="bg-slate-900/50 border-slate-800"
+                                                placeholder="0-23"
                                             />
+                                            {(scheduleForm.hour < 0 || scheduleForm.hour > 23) && (
+                                                <p className="text-xs text-rose-400 mt-1">Hour must be between 0-23</p>
+                                            )}
                                         </div>
                                         <div>
-                                            <label className="text-xs uppercase text-slate-500 mb-2 block">Minute</label>
+                                            <label className="text-xs uppercase text-slate-500 mb-2 block">Minute (0-59)</label>
                                             <Input
                                                 type="number"
                                                 min="0"
                                                 max="59"
                                                 value={scheduleForm.minute}
-                                                onChange={(e) => setScheduleForm({ ...scheduleForm, minute: parseInt(e.target.value) || 0 })}
+                                                onChange={(e) => {
+                                                    const val = parseInt(e.target.value) || 0;
+                                                    const clampedVal = Math.max(0, Math.min(59, val));
+                                                    setScheduleForm({ ...scheduleForm, minute: clampedVal });
+                                                }}
                                                 className="bg-slate-900/50 border-slate-800"
+                                                placeholder="0-59"
                                             />
+                                            {(scheduleForm.minute < 0 || scheduleForm.minute > 59) && (
+                                                <p className="text-xs text-rose-400 mt-1">Minute must be between 0-59</p>
+                                            )}
                                         </div>
+                                    </div>
+                                    <div className="rounded-md bg-slate-800/50 border border-slate-700 p-2">
+                                        <p className="text-xs text-slate-400">
+                                            <span className="text-amber-300 font-medium">Selected schedule:</span>{" "}
+                                            {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][scheduleForm.day_of_week]} at{" "}
+                                            {String(scheduleForm.hour).padStart(2, "0")}:{String(scheduleForm.minute).padStart(2, "0")}
+                                        </p>
                                     </div>
                                 </div>
                             )}
@@ -1789,26 +1941,99 @@ export default function AdminPage() {
                             {scheduleForm.schedule_type === "interval" && (
                                 <div className="space-y-4">
                                     <div>
-                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Repeat Every (Hours)</label>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Quick Presets</label>
+                                        <div className="grid grid-cols-4 gap-2 mb-4">
+                                            {[
+                                                { label: "1h", hours: 1 },
+                                                { label: "6h", hours: 6 },
+                                                { label: "12h", hours: 12 },
+                                                { label: "24h", hours: 24 }
+                                            ].map((preset) => (
+                                                <button
+                                                    key={preset.hours}
+                                                    type="button"
+                                                    onClick={() => setScheduleForm({ 
+                                                        ...scheduleForm, 
+                                                        interval_hours: preset.hours, 
+                                                        interval_minutes: 0 
+                                                    })}
+                                                    className={cn(
+                                                        "px-3 py-2 rounded-md text-xs font-medium border transition-all",
+                                                        scheduleForm.interval_hours === preset.hours && scheduleForm.interval_minutes === 0
+                                                            ? "bg-amber-500/20 border-amber-500/50 text-amber-300 shadow-sm"
+                                                            : "bg-slate-900/50 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300"
+                                                    )}
+                                                >
+                                                    {preset.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="border-t border-slate-800 pt-4">
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Custom Hours</label>
                                         <Input
                                             type="number"
-                                            min="1"
-                                            value={scheduleForm.interval_hours}
-                                            onChange={(e) => setScheduleForm({ ...scheduleForm, interval_hours: parseInt(e.target.value) || 1, interval_minutes: 0 })}
+                                            min="0"
+                                            max="8760"
+                                            placeholder="Enter hours (0-8760)"
+                                            value={scheduleForm.interval_hours > 0 ? scheduleForm.interval_hours : ""}
+                                            onChange={(e) => {
+                                                const val = parseInt(e.target.value) || 0;
+                                                if (val >= 0 && val <= 8760) {
+                                                    setScheduleForm({ 
+                                                        ...scheduleForm, 
+                                                        interval_hours: val, 
+                                                        interval_minutes: val > 0 ? 0 : scheduleForm.interval_minutes 
+                                                    });
+                                                }
+                                            }}
                                             className="bg-slate-900/50 border-slate-800"
                                         />
+                                        <p className="text-xs text-slate-500 mt-1">Maximum: 8760 hours (1 year)</p>
                                     </div>
-                                    <div className="text-center text-slate-400 text-xs">OR</div>
+                                    
+                                    <div className="text-center text-slate-400 text-xs font-medium">OR</div>
+                                    
                                     <div>
-                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Repeat Every (Minutes)</label>
+                                        <label className="text-xs uppercase text-slate-500 mb-2 block">Custom Minutes</label>
                                         <Input
                                             type="number"
                                             min="1"
-                                            value={scheduleForm.interval_minutes}
-                                            onChange={(e) => setScheduleForm({ ...scheduleForm, interval_minutes: parseInt(e.target.value) || 30, interval_hours: 0 })}
+                                            max="59"
+                                            placeholder="Enter minutes (1-59)"
+                                            value={scheduleForm.interval_hours === 0 && scheduleForm.interval_minutes > 0 ? scheduleForm.interval_minutes : ""}
+                                            onChange={(e) => {
+                                                const val = parseInt(e.target.value) || 0;
+                                                if (val >= 1 && val <= 59) {
+                                                    setScheduleForm({ 
+                                                        ...scheduleForm, 
+                                                        interval_minutes: val, 
+                                                        interval_hours: 0 
+                                                    });
+                                                }
+                                            }}
                                             className="bg-slate-900/50 border-slate-800"
                                         />
+                                        <p className="text-xs text-slate-500 mt-1">Note: For intervals ≥ 60 minutes, use hours instead</p>
                                     </div>
+                                    
+                                    {(scheduleForm.interval_hours > 0 || scheduleForm.interval_minutes > 0) && (
+                                        <div className="rounded-md bg-amber-500/10 border border-amber-500/30 p-3">
+                                            <div className="flex items-center gap-2">
+                                                <Clock className="h-4 w-4 text-amber-400" />
+                                                <div className="text-sm">
+                                                    <span className="text-amber-200 font-medium">
+                                                        Schedule will run every{" "}
+                                                        {scheduleForm.interval_hours > 0 
+                                                            ? `${scheduleForm.interval_hours} hour${scheduleForm.interval_hours > 1 ? "s" : ""}`
+                                                            : `${scheduleForm.interval_minutes} minute${scheduleForm.interval_minutes > 1 ? "s" : ""}`
+                                                        }
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -1894,7 +2119,7 @@ export default function AdminPage() {
                                 <Button
                                     variant="secondary"
                                     className="flex-1"
-                                    onClick={() => setShowScheduleModal(false)}
+                                    onClick={handleCancelSchedule}
                                 >
                                     Cancel
                                 </Button>
