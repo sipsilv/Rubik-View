@@ -7,14 +7,18 @@ from .config import settings
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def verify_password(plain_password, hashed_password):
-    # Truncate to 72 bytes before verifying
-    truncated = plain_password.encode("utf-8")[:72]
-    return pwd_context.verify(truncated, hashed_password)
+    # Passlib handles bcrypt's 72-byte limit internally
+    # Just pass the string directly
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        # If verification fails, return False instead of raising
+        return False
 
 def get_password_hash(password):
-    # Truncate to 72 bytes before hashing
-    truncated = password.encode("utf-8")[:72]
-    return pwd_context.hash(truncated)
+    # Passlib handles bcrypt's 72-byte limit internally
+    # Just pass the string directly
+    return pwd_context.hash(password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

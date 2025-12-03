@@ -96,14 +96,13 @@ def upgrade_indicator_schema_if_needed() -> None:
         conn.close()
 
 def ensure_superadmin() -> None:
-    """Create the configured super admin user if it does not exist."""
+    """Create the configured super admin user if it does not exist, and update password if needed."""
     db = database.SessionLocal()
     try:
         user = db.query(models.User).filter(models.User.email == settings.SUPERADMIN_EMAIL).first()
         if not user:
-            # Truncate to 72 bytes for bcrypt
-            password_bytes = settings.SUPERADMIN_PASSWORD.encode("utf-8")[:72]
-            hashed = security.pwd_context.hash(password_bytes)
+            # Use the proper password hashing function
+            hashed = security.get_password_hash(settings.SUPERADMIN_PASSWORD)
 
             user = models.User(
                 email=settings.SUPERADMIN_EMAIL,
@@ -114,6 +113,13 @@ def ensure_superadmin() -> None:
             )
             db.add(user)
             db.commit()
+        else:
+            # Update password hash if it was created with old method
+            # Test if current password verifies correctly
+            if not security.verify_password(settings.SUPERADMIN_PASSWORD, user.hashed_password):
+                # Password doesn't verify, rehash it
+                user.hashed_password = security.get_password_hash(settings.SUPERADMIN_PASSWORD)
+                db.commit()
     finally:
         db.close()
 
