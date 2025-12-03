@@ -5,8 +5,9 @@ services:
       dockerfile: Dockerfile
     container_name: fastapi-backend
     ports:
-      - "8000: 8000"
+      - "8000:8000"
     environment:
+      ENV: "DEV"
     volumes:
-      - ./app
+      - ./backend:/app
     restart: unless-stopped
