@@ -8,6 +8,9 @@ services:
       - "8000:8000"
     environment:
       ENV: "DEV"
+    volumes:
+      - ./backend:/app          # bind mount for live changes
+    command: uvicorn main:app --host 0.0.0.0 --reload
     restart: unless-stopped
 
   frontend:
@@ -19,4 +22,8 @@ services:
       - "3000:3000"
     environment:
       ENV: "DEV"
-    restart : unless-stopped
+    volumes:
+      - ./frontend:/app         # bind mount for live changes
+      - /app/node_modules       # prevent overwriting node_modules
+    command: npm run dev
+    restart: unless-stopped

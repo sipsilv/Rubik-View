@@ -111,6 +111,7 @@ const adminTabs: { key: AdminTab; label: string; description: string; icon: type
 export default function AdminPage() {
     const router = useRouter();
     const [accessLoading, setAccessLoading] = useState(true);
+    const [role, setRole] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<AdminTab>("processors");
     const [users, setUsers] = useState<UserRecord[]>([]);
     const [jobs, setJobs] = useState<AdminJob[]>([]);
