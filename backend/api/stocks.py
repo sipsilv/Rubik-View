@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Optional
 import duckdb
 import pandas as pd
-from ..core import database, config
+from core import database, config
 
 router = APIRouter()
 

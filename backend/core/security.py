@@ -7,10 +7,15 @@ from .config import settings
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    # Truncate to 72 bytes before verifying
+    truncated = plain_password.encode("utf-8")[:72]
+    return pwd_context.verify(truncated, hashed_password)
 
 def get_password_hash(password):
-    return pwd_context.hash(password)
+    # Truncate to 72 bytes before hashing
+    truncated = password.encode("utf-8")[:72]
+    return pwd_context.hash(truncated)
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()

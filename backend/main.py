@@ -5,10 +5,10 @@ from urllib.parse import urlparse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .core import database, models, security
+from core import database, models, security
 # scheduler as scheduler_module  # Temporarily disabled
-from .core.config import settings
-from .api import auth, stocks, analysis, admin
+from core.config import settings
+from api import auth, stocks, analysis, admin
 
 
 def _get_sqlite_path() -> str | None:
@@ -101,7 +101,10 @@ def ensure_superadmin() -> None:
     try:
         user = db.query(models.User).filter(models.User.email == settings.SUPERADMIN_EMAIL).first()
         if not user:
-            hashed = security.get_password_hash(settings.SUPERADMIN_PASSWORD)
+            # Truncate to 72 bytes for bcrypt
+            password_bytes = settings.SUPERADMIN_PASSWORD.encode("utf-8")[:72]
+            hashed = security.pwd_context.hash(password_bytes)
+
             user = models.User(
                 email=settings.SUPERADMIN_EMAIL,
                 hashed_password=hashed,
@@ -113,6 +116,7 @@ def ensure_superadmin() -> None:
             db.commit()
     finally:
         db.close()
+
 
 
 # 1) Ensure tables exist

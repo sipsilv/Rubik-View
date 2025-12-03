@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 import duckdb
 import pandas as pd
 import numpy as np
-from ..core import database, config, constants
+from core import database, config, constants
 
 router = APIRouter()
 

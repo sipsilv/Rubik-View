@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 import json
 
-from .. import schemas
-from ..core import jobs, models, log_db
+import schemas
+from core import jobs, models, log_db
 # scheduler  # Temporarily disabled
 try:
     from ..core import scheduler

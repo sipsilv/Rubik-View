@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from .. import schemas
-from ..core import change_requests, database, models, notifications, otp, security
-from ..core.config import settings
+import schemas
+from core import change_requests, database, models, notifications, otp, security
+from core.config import settings
 
 router = APIRouter()
 
@@ -92,7 +92,7 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
         hashed_password=hashed_password,
         full_name=user.full_name,
         role="user",
-    )
+   )
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -180,7 +180,7 @@ async def update_password(
 
     notifications.send_telegram_message(
         current_user.telegram_chat_id,
-        f"Password updated for {current_user.email} at {datetime.utcnow().isoformat()}",
+        f"Pasword updated for {current_user.email} at {datetime.utcnow().isoformat()}",
     )
     return current_user
 
@@ -268,7 +268,7 @@ async def admin_create_user(
     return db_user
 
 @router.put("/users/{user_id}", response_model=schemas.UserDetail)
-async def admin_update_user(
+async def admn_update_user(
     user_id: int,
     payload: schemas.AdminUserUpdate,
     _: models.User = Depends(require_admin),
