@@ -181,8 +181,8 @@ Rubik_view/
 
 ## 🔐 Default Credentials
 
-- **Email:** `jallusandeep@rubikview.com`
-- **Password:** `8686504620SAn@#1`
+- **Email:** ``
+- **Password:** ``
 - **Role:** Super Admin
 
 ---
