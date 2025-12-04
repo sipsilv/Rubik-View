@@ -1,187 +1,48 @@
-from datetime import datetime, timedelta
-from typing import List
-
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from typing import List
 from sqlalchemy.orm import Session
+from datetime import datetime
 
+from db.session import get_db
+from api.dependencies.auth import get_current_user, require_admin
+from services import auth_service, profile_service, otp_service, admin_service, feedback_service
 import schemas
-from core import change_requests, database, models, notifications, otp, security, user_utils
-from core.config import settings
+import models
 
 router = APIRouter()
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-def get_db():
-    db = database.SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = security.jwt.decode(token, security.settings.SECRET_KEY, algorithms=[security.settings.ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-        token_data = schemas.TokenData(email=email)
-    except security.JWTError:
-        raise credentials_exception
-    user = db.query(models.User).filter(models.User.email == token_data.email).first()
-    if user is None:
-        raise credentials_exception
-    
-    # Update last activity timestamp on each authenticated request
-    user.last_activity = datetime.utcnow()
-    db.add(user)
-    db.commit()
-    
-    return user
-
-def require_admin(current_user: models.User = Depends(get_current_user)):
-    if current_user.role not in {"admin", settings.SUPERADMIN_ROLE}:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required"
-        )
-    return current_user
-
-def _get_user_by_id(db: Session, user_id: int) -> models.User:
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
-
-def _ensure_can_issue_otp(db: Session, user: models.User, purpose: str):
-    window = datetime.utcnow() - timedelta(seconds=settings.OTP_RESEND_SECONDS)
-    recent = (
-        db.query(models.OTPToken)
-        .filter(
-            models.OTPToken.user_id == user.id,
-            models.OTPToken.purpose == purpose,
-            models.OTPToken.created_at >= window,
-        )
-        .order_by(models.OTPToken.created_at.desc())
-        .first()
-    )
-    if recent:
-        raise HTTPException(status_code=429, detail="OTP already sent. Please wait before requesting again.")
-
-def _apply_profile_updates(user: models.User, payload):
-    user.full_name = payload.full_name if payload.full_name is not None else user.full_name
-    user.phone_number = payload.phone_number if payload.phone_number is not None else user.phone_number
-    user.age = payload.age if payload.age is not None else user.age
-    user.address_line1 = payload.address_line1 if payload.address_line1 is not None else user.address_line1
-    user.address_line2 = payload.address_line2 if payload.address_line2 is not None else user.address_line2
-    user.city = payload.city if payload.city is not None else user.city
-    user.state = payload.state if payload.state is not None else user.state
-    user.postal_code = payload.postal_code if payload.postal_code is not None else user.postal_code
-    user.country = payload.country if payload.country is not None else user.country
-    user.telegram_chat_id = payload.telegram_chat_id if payload.telegram_chat_id is not None else user.telegram_chat_id
+# ----------------- AUTH -----------------
 
 @router.post("/signup", response_model=schemas.User)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    return auth_service.signup(user, db)
 
-    hashed_password = security.get_password_hash(user.password)
-    db_user = models.User(
-        email=user.email,
-        hashed_password=hashed_password,
-        full_name=user.full_name,
-        role="user",
-   )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
 
 @router.post("/logout")
 async def logout(
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db)
 ):
-    """Logout user and clear activity status"""
-    # Set last_activity to a past date to mark as inactive immediately
-    current_user.last_activity = datetime.utcnow() - timedelta(hours=1)
-    db.add(current_user)
-    db.commit()
-    return {"message": "Logged out successfully"}
+    return auth_service.logout(current_user, db)
+
 
 @router.post("/token", response_model=schemas.Token)
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    try:
-        # Try to find user by email, userid, or phone_number
-        username = form_data.username.strip()
-        user = (
-            db.query(models.User)
-            .filter(
-                (models.User.email == username) |
-                (models.User.userid == username) |
-                (models.User.phone_number == username)
-            )
-            .first()
-        )
+def login(form_data=Depends(), db: Session = Depends(get_db)):
+    return auth_service.login(form_data, db)
 
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Account is inactive",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        # Verify password
-        password_valid = security.verify_password(form_data.password, user.hashed_password)
-        if not password_valid:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        # Update last activity timestamp
-        user.last_activity = datetime.utcnow()
-        db.add(user)
-        db.commit()
-        
-        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = security.create_access_token(
-            data={"sub": user.email}, expires_delta=access_token_expires
-        )
-        return {"access_token": access_token, "token_type": "bearer", "role": user.role}
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Log the error for debugging
-        import logging
-        logging.error(f"Login error: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}",
-        )
 
 @router.get("/users/me", response_model=schemas.UserDetail)
-async def read_users_me(current_user: models.User = Depends(get_current_user)):
+async def me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+# ----------------- PROFILE -----------------
 
 @router.get("/users/me/profile", response_model=schemas.UserDetail)
 async def read_profile(current_user: models.User = Depends(get_current_user)):
     return current_user
+
 
 @router.put("/users/me/profile", response_model=schemas.UserDetail)
 async def update_profile(
@@ -189,33 +50,8 @@ async def update_profile(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    if not otp.verify_otp(db, current_user, "PROFILE_UPDATE", payload.otp_code):
-        raise HTTPException(status_code=400, detail="Invalid or expired OTP.")
+    return profile_service.update_profile(db, current_user, payload)
 
-    _apply_profile_updates(current_user, payload)
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-
-    changes = [
-        field
-        for field in payload.model_dump(exclude_unset=True).keys()
-        if field != "otp_code"
-    ]
-    details = f"Updated fields: {', '.join(changes)}" if changes else "Profile updated."
-    change_requests.create_change_request(
-        db,
-        current_user,
-        request_type="PROFILE_UPDATE",
-        status="completed",
-        details=details,
-    )
-
-    notifications.send_telegram_message(
-        current_user.telegram_chat_id,
-        f"Profile updated for {current_user.email} at {datetime.utcnow().isoformat()}",
-    )
-    return current_user
 
 @router.post("/users/me/password", response_model=schemas.UserDetail)
 async def update_password(
@@ -223,27 +59,10 @@ async def update_password(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    if not otp.verify_otp(db, current_user, "PASSWORD_CHANGE", payload.otp_code):
-        raise HTTPException(status_code=400, detail="Invalid or expired OTP.")
+    return profile_service.update_password(db, current_user, payload)
 
-    current_user.hashed_password = security.get_password_hash(payload.new_password)
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
 
-    change_requests.create_change_request(
-        db,
-        current_user,
-        request_type="PASSWORD_CHANGE",
-        status="completed",
-        details="Password updated",
-    )
-
-    notifications.send_telegram_message(
-        current_user.telegram_chat_id,
-        f"Pasword updated for {current_user.email} at {datetime.utcnow().isoformat()}",
-    )
-    return current_user
+# ----------------- OTP -----------------
 
 @router.post("/otp/request")
 async def request_otp(
@@ -251,51 +70,18 @@ async def request_otp(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    _ensure_can_issue_otp(db, current_user, payload.purpose)
-    otp_obj, code = otp.create_otp(db, current_user, payload.purpose)
+    return otp_service.request_otp(db, current_user, payload)
 
-    delivered = notifications.send_telegram_message(
-        current_user.telegram_chat_id,
-        f"Your OTP for {payload.purpose.replace('_', ' ').title()} is {code}. Expires at {otp_obj.expires_at} UTC",
-    )
-    response = {"message": "OTP generated", "delivered": delivered}
-    if not delivered:
-        response["debug_code"] = code
-    return response
+
+# ----------------- ADMIN USER MGMT -----------------
 
 @router.get("/users", response_model=List[schemas.UserDetail])
 async def list_users(
     _: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    return db.query(models.User).order_by(models.User.id).all()
+    return admin_service.list_users(db)
 
-
-@router.get("/users/me/change-requests", response_model=List[schemas.ChangeRequest])
-async def list_my_change_requests(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    return (
-        db.query(models.ChangeRequest)
-        .filter(models.ChangeRequest.user_id == current_user.id)
-        .order_by(models.ChangeRequest.created_at.desc())
-        .limit(50)
-        .all()
-    )
-
-
-@router.get("/change-requests", response_model=List[schemas.ChangeRequest])
-async def list_change_requests(
-    _: models.User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    return (
-        db.query(models.ChangeRequest)
-        .order_by(models.ChangeRequest.created_at.desc())
-        .limit(100)
-        .all()
-    )
 
 @router.post("/users", response_model=schemas.UserDetail, status_code=status.HTTP_201_CREATED)
 async def admin_create_user(
@@ -303,34 +89,8 @@ async def admin_create_user(
     _: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+    return admin_service.create_user(db, user)
 
-    # Generate unique userid if not provided (using name and mobile)
-    userid = user_utils.generate_unique_userid(db, full_name=user.full_name, phone_number=user.phone_number)
-
-    hashed_password = security.get_password_hash(user.password)
-    db_user = models.User(
-        userid=userid,
-        email=user.email,
-        hashed_password=hashed_password,
-        full_name=user.full_name,
-        role=user.role,
-        phone_number=user.phone_number,
-        age=user.age,
-        address_line1=user.address_line1,
-        address_line2=user.address_line2,
-        city=user.city,
-        state=user.state,
-        postal_code=user.postal_code,
-        country=user.country,
-        telegram_chat_id=user.telegram_chat_id,
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
 
 @router.put("/users/{user_id}", response_model=schemas.UserDetail)
 async def admin_update_user(
@@ -339,26 +99,8 @@ async def admin_update_user(
     _: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    user = _get_user_by_id(db, user_id)
+    return admin_service.update_user(db, user_id, payload)
 
-    # Handle userid change with uniqueness check
-    if payload.userid is not None and payload.userid != user.userid:
-        if not user_utils.check_userid_unique(db, payload.userid, exclude_user_id=user_id):
-            raise HTTPException(status_code=400, detail=f"UserID '{payload.userid}' is already taken")
-        user.userid = payload.userid
-
-    _apply_profile_updates(user, payload)
-    if payload.role:
-        user.role = payload.role
-    if payload.is_active is not None:
-        user.is_active = payload.is_active
-    if payload.password:
-        user.hashed_password = security.get_password_hash(payload.password)
-
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
 
 @router.post("/users/{user_id}/notify")
 async def admin_notify_user(
@@ -367,82 +109,32 @@ async def admin_notify_user(
     _: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    user = _get_user_by_id(db, user_id)
-    sent = notifications.send_telegram_message(user.telegram_chat_id, payload.message)
-    return {"delivered": sent}
+    return admin_service.notify_user(db, user_id, payload)
+
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(
+async def admin_delete_user(
     user_id: int,
     _: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    user = _get_user_by_id(db, user_id)
-
-    if user.email == settings.SUPERADMIN_EMAIL:
-        raise HTTPException(status_code=400, detail="Cannot delete super admin account")
-
-    db.delete(user)
-    db.commit()
+    return admin_service.delete_user(db, user_id)
 
 
-# ========== User Feedback Endpoints ==========
+# ----------------- FEEDBACK -----------------
 
-@router.post("/contact-admin", response_model=schemas.PendingUserRequestResponse, status_code=status.HTTP_201_CREATED)
-async def contact_admin(
-    request: schemas.ContactAdminRequest,
-    db: Session = Depends(get_db),
-):
-    """
-    Public endpoint for users to request account creation.
-    Creates a pending user request with auto-generated unique userid.
-    """
-    # Generate unique userid based on name and mobile
-    userid = user_utils.generate_unique_userid(db, full_name=request.full_name, phone_number=request.phone_number)
-    
-    # Create pending user request
-    pending_request = models.PendingUserRequest(
-        userid=userid,
-        full_name=request.full_name,
-        email=request.email,
-        phone_number=request.phone_number,
-        age=request.age,
-        address_line1=request.address_line1,
-        address_line2=request.address_line2,
-        city=request.city,
-        state=request.state,
-        postal_code=request.postal_code,
-        country=request.country,
-        telegram_chat_id=request.telegram_chat_id,
-        message=request.message,
-        status="pending",
-    )
-    
-    db.add(pending_request)
-    db.commit()
-    db.refresh(pending_request)
-    
-    return pending_request
+@router.post("/contact-admin", response_model=schemas.PendingUserRequestResponse)
+async def contact_admin(request: schemas.ContactAdminRequest, db: Session = Depends(get_db)):
+    return feedback_service.create_pending_request(db, request)
 
 
-@router.post("/feedback", response_model=schemas.UserFeedbackResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/feedback", response_model=schemas.UserFeedbackResponse)
 async def create_feedback(
     payload: schemas.UserFeedbackCreate,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Submit feedback, feature request, or bug report."""
-    feedback = models.UserFeedback(
-        user_id=current_user.id,
-        feedback_type=payload.feedback_type,
-        title=payload.title,
-        description=payload.description,
-        status="pending",
-    )
-    db.add(feedback)
-    db.commit()
-    db.refresh(feedback)
-    return feedback
+    return feedback_service.create_feedback(db, current_user, payload)
 
 
 @router.get("/feedback", response_model=List[schemas.UserFeedbackResponse])
@@ -450,14 +142,7 @@ async def list_my_feedback(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List feedback submitted by the current user."""
-    return (
-        db.query(models.UserFeedback)
-        .filter(models.UserFeedback.user_id == current_user.id)
-        .order_by(models.UserFeedback.created_at.desc())
-        .limit(50)
-        .all()
-    )
+    return feedback_service.list_my_feedback(db, current_user)
 
 
 @router.get("/feedback/all", response_model=List[schemas.UserFeedbackResponse])
@@ -465,13 +150,7 @@ async def list_all_feedback(
     _: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Admin: List all feedback from all users."""
-    return (
-        db.query(models.UserFeedback)
-        .order_by(models.UserFeedback.created_at.desc())
-        .limit(100)
-        .all()
-    )
+    return feedback_service.list_all_feedback(db)
 
 
 @router.put("/feedback/{feedback_id}", response_model=schemas.UserFeedbackResponse)
@@ -481,20 +160,7 @@ async def update_feedback(
     _: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Admin: Update feedback status or add notes."""
-    feedback = db.query(models.UserFeedback).filter(models.UserFeedback.id == feedback_id).first()
-    if not feedback:
-        raise HTTPException(status_code=404, detail="Feedback not found")
-
-    if payload.status is not None:
-        feedback.status = payload.status
-    if payload.admin_notes is not None:
-        feedback.admin_notes = payload.admin_notes
-
-    db.add(feedback)
-    db.commit()
-    db.refresh(feedback)
-    return feedback
+    return feedback_service.update_feedback(db, feedback_id, payload)
 
 
 @router.delete("/feedback/{feedback_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -503,9 +169,5 @@ async def delete_feedback(
     _: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Admin: Delete a feedback entry."""
-    feedback = db.query(models.UserFeedback).filter(models.UserFeedback.id == feedback_id).first()
-    if not feedback:
-        raise HTTPException(status_code=404, detail="Feedback not found")
-    db.delete(feedback)
-    db.commit()
+    return feedback_service.delete_feedback(db, feedback_id)
+

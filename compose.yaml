@@ -9,7 +9,7 @@ services:
     environment:
       ENV: "DEV"
     volumes:
-      - ./backend:/app          # bind mount for live changes
+      - ./backend:/app
     command: uvicorn main:app --host 0.0.0.0 --reload
     restart: unless-stopped
 
@@ -23,7 +23,20 @@ services:
     environment:
       ENV: "DEV"
     volumes:
-      - ./frontend:/app         # bind mount for live changes
-      - /app/node_modules       # prevent overwriting node_modules
+      - ./frontend:/app
+      - /app/node_modules
     command: npm run dev
     restart: unless-stopped
+
+  auth_db:
+    image: postgres:15
+    container_name: auth_db
+    env_file:
+      - .env
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
