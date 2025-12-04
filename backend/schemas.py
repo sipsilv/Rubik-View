@@ -50,7 +50,7 @@ class UserDetail(User):
     updated_at: Optional[datetime] = None
 
 class AdminUserUpdate(BaseModel):
-    userid: Optional[str] = None  # Allow changing userid
+    userid: Optional[str] = None  # NOTE: userid cannot be changed once created (immutable)
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
     age: Optional[int] = None
@@ -277,11 +277,23 @@ class ContactAdminRequest(BaseModel):
     message: Optional[str] = None
 
 
-class PendingUserRequestResponse(BaseModel):
+# New three-table structure schemas
+class LoginCredentialsResponse(BaseModel):
     id: int
     userid: str
+    is_active: bool
+    role: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class UserDetailsResponse(BaseModel):
+    id: int
+    userid: str
+    email: str
     full_name: Optional[str] = None
-    email: Optional[str] = None
     phone_number: Optional[str] = None
     age: Optional[int] = None
     address_line1: Optional[str] = None
@@ -290,11 +302,59 @@ class PendingUserRequestResponse(BaseModel):
     state: Optional[str] = None
     postal_code: Optional[str] = None
     country: Optional[str] = None
-    telegram_chat_id: Optional[str] = None
-    message: Optional[str] = None
-    status: str
+    last_activity: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+# Combined response for admin (LoginCredentials + UserDetails)
+class UserDetailCombined(BaseModel):
+    id: int  # From LoginCredentials
+    userid: str  # Immutable - cannot be changed once created
+    email: str
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    age: Optional[int] = None
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    role: str
+    is_active: bool
+    last_activity: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+# UserRequests schema (renamed from PendingUserRequest)
+class UserRequestResponse(BaseModel):
+    id: int
+    userid: str
+    full_name: str
+    email: str
+    phone_number: str
+    age: int
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    message: Optional[str] = None
+    status: str
+    resolved_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+# Legacy schema for backward compatibility
+class PendingUserRequestResponse(UserRequestResponse):
+    pass

@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef, memo } from "react";
 import { useRouter } from "next/navigation";
 import {
     Shield,
@@ -27,6 +27,7 @@ import {
     Filter,
     Search,
     Eye,
+    Check,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -280,42 +281,41 @@ export default function AdminPage() {
         }
     }, [authLoading, isValid, router]);
 
-    const fetchUsers = async () => {
+    const fetchUsers = useCallback(async () => {
         try {
             const response = await api.get("/auth/users");
-            // Ensure last_activity is properly parsed
+            // Ensure last_activity is properly parsed as UTC
             const usersWithActivity = response.data.map((user: any) => ({
                 ...user,
-                last_activity: user.last_activity ? new Date(user.last_activity).toISOString() : null
+                last_activity: user.last_activity
+                    ? new Date(user.last_activity.endsWith('Z') ? user.last_activity : user.last_activity + 'Z').toISOString()
+                    : null
             }));
             setUsers(usersWithActivity);
         } catch (error) {
             console.error("Failed to load users", error);
         }
-    };
+    }, []);
 
     // State to force re-render for real-time activity updates
     const [activityUpdateTrigger, setActivityUpdateTrigger] = useState(0);
 
-    // Real-time activity status updates
+    // Activity status updates (only for accounts tab, not users_query to prevent interference)
     useEffect(() => {
-        if (activeTab !== "accounts" && activeTab !== "users_query") return;
-        
-        // Initial fetch
+        if (activeTab !== "accounts") return;
+
+        // Initial fetch for accounts tab only
         fetchUsers();
-        if (activeTab === "users_query") {
-            fetchPendingUsers();
-        }
-        
-        // Update more frequently for real-time activity status
+
+        // Update less frequently to avoid interfering with user interactions
         const interval = setInterval(() => {
-            fetchUsers();
-            if (activeTab === "users_query") {
-                fetchPendingUsers();
+            // Only update accounts tab
+            if (activeTab === "accounts") {
+                fetchUsers();
+                // Force re-render to update activity status
+                setActivityUpdateTrigger(prev => prev + 1);
             }
-            // Force re-render to update activity status
-            setActivityUpdateTrigger(prev => prev + 1);
-        }, 10000); // Update every 10 seconds for real-time status
+        }, 60000); // Update every 60 seconds (1 minute) instead of 10 seconds
 
         return () => clearInterval(interval);
     }, [activeTab]);
@@ -500,14 +500,24 @@ export default function AdminPage() {
         }
     };
 
-    const fetchPendingUsers = async () => {
+    const fetchPendingUsers = useCallback(async () => {
         try {
-            const response = await api.get("/admin/pending-users?status=pending");
-            setPendingUsers(response.data);
-        } catch (error) {
-            console.error("Failed to load pending users", error);
+            const response = await api.get("/admin/pending-users", {
+                timeout: 5000, // 5 second timeout
+            });
+            setPendingUsers(response.data || []);
+        } catch (error: any) {
+            // Silently handle network errors - don't log to console to avoid noise
+            // Only set empty array to prevent errors in UI
+            if (error.code === 'ECONNABORTED' || error.message === 'Network Error' || !error.response) {
+                // Network error or timeout - backend might not be running
+                setPendingUsers([]);
+                return;
+            }
+            // For other errors, still set empty array but could log if needed
+            setPendingUsers([]);
         }
-    };
+    }, []);
 
     const handleApprovePendingUser = async (requestId: number) => {
         if (!approvePassword) {
@@ -593,7 +603,7 @@ export default function AdminPage() {
         fetchFeedback();
         fetchSchedules();
         fetchSymbols();
-        fetchPendingUsers();
+        // DO NOT fetchPendingUsers() automatically - only fetch when user clicks "Load Data" in Users Query tab
         const interval = setInterval(() => {
             fetchJobs();
             fetchOhlcvStatus();
@@ -707,9 +717,15 @@ export default function AdminPage() {
         setCreatingUser(true);
         setCreateMessage(null);
         try {
+            // Validate required fields
+            if (!createForm.full_name || createForm.full_name.trim() === "") {
+                setCreateMessage({ type: "error", text: "Full Name is required." });
+                setCreatingUser(false);
+                return;
+            }
             const payload = {
                 ...createForm,
-                full_name: createForm.full_name || undefined,
+                full_name: createForm.full_name.trim(),
                 phone_number: createForm.phone_number || undefined,
                 state: createForm.state || undefined,
                 country: createForm.country || undefined,
@@ -730,6 +746,11 @@ export default function AdminPage() {
                 postal_code: "",
             });
             fetchUsers();
+            // Close drawer after successful creation
+            setTimeout(() => {
+                setShowCreateDrawer(false);
+                setCreateMessage(null);
+            }, 1500);
         } catch (error: unknown) {
             const err = error as { response?: { data?: { detail?: string } } };
             setCreateMessage({
@@ -778,11 +799,11 @@ export default function AdminPage() {
                 });
                 return;
             }
-            
+
             const payload: any = {};
             if (editForm.userid) payload.userid = editForm.userid;
             if (editForm.password) payload.password = editForm.password;
-            
+
             await api.put(`/auth/users/${userId}`, payload);
             setEditingUserId(null);
             setEditForm({ userid: "", password: "" });
@@ -815,21 +836,27 @@ export default function AdminPage() {
         }
     };
 
-    const isUserActiveNow = (user: UserRecord): boolean => {
+    const isUserActiveNow = useCallback((user: UserRecord): boolean => {
         if (!user.last_activity) return false;
         try {
-            const lastActivity = new Date(user.last_activity);
+            // Ensure UTC handling
+            const lastActivityStr = user.last_activity.endsWith('Z') ? user.last_activity : user.last_activity + 'Z';
+            const lastActivity = new Date(lastActivityStr);
             const now = new Date();
             // Check if date is valid
             if (isNaN(lastActivity.getTime())) return false;
+
+            // Calculate difference in seconds
             const diffSeconds = (now.getTime() - lastActivity.getTime()) / 1000;
-            // Active if last activity within 2 minutes (120 seconds) and not in the future
-            return diffSeconds <= 120 && diffSeconds >= 0;
+
+            // Active if last activity within 1 minute (60 seconds)
+            // Allow for some clock skew (up to -60 seconds in future)
+            return diffSeconds <= 60 && diffSeconds >= -60;
         } catch (error) {
             console.error("Error checking user activity:", error, user);
             return false;
         }
-    };
+    }, []);
 
     const handleNotifyUser = async (user: UserRecord) => {
         const promptMessage = window.prompt(
@@ -1238,9 +1265,54 @@ export default function AdminPage() {
             );
         });
 
+        // Get newly approved users that need verification (inactive users created from pending requests)
+        const newUserRequests = users.filter(user => !user.is_active && user.created_at && 
+            new Date(user.created_at).getTime() > Date.now() - 7 * 24 * 60 * 60 * 1000); // Created in last 7 days
+
         return (
         <div className="space-y-6">
-            <section>
+                {/* New User Requests Notification */}
+                {newUserRequests.length > 0 && (
+                    <div className="glass-panel rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <Bell className="h-5 w-5 text-amber-400" />
+                                <div>
+                                    <h3 className="text-sm font-semibold text-amber-300">New User Requests ({newUserRequests.length})</h3>
+                                    <p className="text-xs text-amber-400/70">Users approved from Users Query tab need verification and enablement</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                            {newUserRequests.map((user) => (
+                                <div key={user.id} className="flex items-center justify-between p-2 bg-slate-900/50 rounded-lg border border-slate-800">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                                        <span className="text-sm text-slate-200">{user.full_name || user.email}</span>
+                                        <span className="text-xs text-slate-400">({user.userid || user.email})</span>
+                                    </div>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs"
+                                        onClick={() => {
+                                            // Scroll to user in table or highlight
+                                            const userRow = document.getElementById(`user-row-${user.id}`);
+                                            if (userRow) {
+                                                userRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                userRow.classList.add('ring-2', 'ring-emerald-500');
+                                                setTimeout(() => userRow.classList.remove('ring-2', 'ring-emerald-500'), 3000);
+                                            }
+                                        }}
+                                    >
+                                        Verify User
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                <section>
                 {/* Users Table */}
                 <div className="glass-panel rounded-xl border border-slate-800 p-4 space-y-3">
                     <div className="flex items-center justify-between">
@@ -1249,16 +1321,16 @@ export default function AdminPage() {
                             <h3 className="text-lg font-semibold">Accounts</h3>
                         </div>
                         <div className="flex items-center gap-2">
-                            <div className="relative">
-                                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                                <Input
-                                    type="text"
-                                    placeholder="Search by name, email, userid, phone..."
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="pl-8 bg-slate-900/50 border-slate-800 text-xs h-8 w-64"
-                                />
-                            </div>
+                                <div className="relative">
+                                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                                    <Input
+                                        type="text"
+                                        placeholder="Search by name, email, userid, phone..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        className="pl-8 bg-slate-900/50 border-slate-800 text-xs h-8 w-64"
+                                    />
+                                </div>
                             <Button className="bg-sky-500 hover:bg-sky-400 text-xs flex items-center gap-2" onClick={() => setShowCreateDrawer(true)}>
                                 <Plus className="h-4 w-4" />
                                 Create User
@@ -1286,62 +1358,71 @@ export default function AdminPage() {
                             <thead className="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-500">
                                 <tr>
                                     <th className="px-4 py-3 text-left">User</th>
-                                    <th className="px-4 py-3 text-left">UserID</th>
-                                    <th className="px-4 py-3 text-left">Password</th>
+                                        <th className="px-4 py-3 text-left">UserID</th>
+                                        <th className="px-4 py-3 text-left">Password</th>
                                     <th className="px-4 py-3 text-left">Role</th>
-                                    <th className="px-4 py-3 text-left">Status</th>
-                                    <th className="px-4 py-3 text-left">Activity</th>
-                                    <th className="px-4 py-3 text-left">Full Details</th>
+                                        <th className="px-4 py-3 text-left">Status</th>
+                                        <th className="px-4 py-3 text-left">Activity</th>
+                                        <th className="px-4 py-3 text-left">Full Details</th>
                                     <th className="px-4 py-3 text-left">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-900">
-                                {filteredUsers.map((user) => {
+                                    {filteredUsers.map((user) => {
                                     const pending = changeRequests.filter((req) => req.user?.email === user.email);
                                     const isSuperAdmin = user.email === SUPER_ADMIN_EMAIL;
-                                    // Recalculate activity status on each render for real-time updates
-                                    const isActive = isUserActiveNow(user);
-                                    const isEditing = editingUserId === user.id;
-                                    // Use activityUpdateTrigger to force re-calculation
-                                    void activityUpdateTrigger;
-                                    
+                                        // Recalculate activity status on each render for real-time updates
+                                        const isActive = isUserActiveNow(user);
+                                        const isEditing = editingUserId === user.id;
+                                        // Use activityUpdateTrigger to force re-calculation
+                                        void activityUpdateTrigger;
+                                        const isNewUserRequest = !user.is_active && user.created_at && 
+                                            new Date(user.created_at).getTime() > Date.now() - 7 * 24 * 60 * 60 * 1000;
+
                                     return (
-                                        <tr key={user.id} className="hover:bg-slate-900/40">
+                                            <tr 
+                                                id={`user-row-${user.id}`}
+                                                key={user.id} 
+                                                className={cn(
+                                                    "hover:bg-slate-900/40",
+                                                    isNewUserRequest && "bg-amber-500/5 border-l-2 border-amber-500"
+                                                )}
+                                            >
                                             <td className="px-4 py-3">
                                                 <p className="font-semibold text-white">{user.full_name || "Unassigned"}</p>
                                                 <p className="text-xs text-slate-400">{user.email}</p>
                                             </td>
-                                            <td className="px-4 py-3">
-                                                {isEditing ? (
-                                                    <Input
-                                                        value={editForm.userid}
-                                                        onChange={(e) => {
-                                                            const value = e.target.value;
-                                                            // Only allow alphanumeric, underscore, hyphen (no @)
-                                                            if (/^[a-zA-Z0-9_-]*$/.test(value)) {
-                                                                setEditForm(prev => ({ ...prev, userid: value }));
-                                                            }
-                                                        }}
-                                                        className="bg-slate-900/60 border-slate-800 text-xs h-7 w-24"
-                                                        placeholder="UserID (alphanumeric)"
-                                                        title="Alphanumeric only (no @ symbol)"
-                                                    />
-                                                ) : (
-                                                    <span className="text-slate-300 text-xs font-mono">{user.userid || "—"}</span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {isEditing ? (
-                                                    <Input
-                                                        type="password"
-                                                        value={editForm.password}
-                                                        onChange={(e) => setEditForm(prev => ({ ...prev, password: e.target.value }))}
-                                                        className="bg-slate-900/60 border-slate-800 text-xs h-7 w-32"
-                                                        placeholder="New password"
-                                                    />
-                                                ) : (
-                                                    <span className="text-slate-400 text-xs font-mono">••••••••</span>
-                                                )}
+                                                <td className="px-4 py-3">
+                                                    {isEditing ? (
+                                                        <Input
+                                                            value={editForm.userid}
+                                                            onChange={(e) => {
+                                                                const value = e.target.value;
+                                                                // Only allow alphanumeric, underscore, hyphen (no @)
+                                                                if (/^[a-zA-Z0-9_-]*$/.test(value)) {
+                                                                    setEditForm(prev => ({ ...prev, userid: value }));
+                                                                }
+                                                            }}
+                                                            className="bg-slate-900/60 border-slate-800 text-xs h-7 w-24"
+                                                            placeholder="UserID (alphanumeric)"
+                                                            title="Alphanumeric only (no @ symbol)"
+                                                        />
+                                                    ) : (
+                                                        <span className="text-slate-300 text-xs font-mono">{user.userid || "—"}</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {isEditing ? (
+                                                        <Input
+                                                            type="password"
+                                                            value={editForm.password}
+                                                            onChange={(e) => setEditForm(prev => ({ ...prev, password: e.target.value }))}
+                                                            className="bg-slate-900/60 border-slate-800 text-xs h-7 w-32"
+                                                            placeholder="New password"
+                                                        />
+                                                    ) : (
+                                                        <span className="text-slate-400 text-xs font-mono">••••••••</span>
+                                                    )}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <span
@@ -1355,110 +1436,110 @@ export default function AdminPage() {
                                                     {user.role}
                                                 </span>
                                             </td>
-                                            <td className="px-4 py-3">
-                                                <button
-                                                    onClick={() => handleToggleUserActive(user.id, user.is_active)}
-                                                    disabled={togglingUserId === user.id}
-                                                    className={cn(
-                                                        "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2",
-                                                        user.is_active ? "bg-emerald-500" : "bg-slate-700",
-                                                        (isSuperAdmin || togglingUserId === user.id) && "opacity-50 cursor-not-allowed"
-                                                    )}
-                                                >
-                                                    {togglingUserId === user.id ? (
-                                                        <SimpleSpinner size={10} />
-                                                    ) : (
-                                                        <span
-                                                            className={cn(
-                                                                "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
-                                                                user.is_active ? "translate-x-6" : "translate-x-1"
-                                                            )}
-                                                        />
-                                                    )}
-                                                </button>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={cn(
-                                                        "w-2 h-2 rounded-full",
-                                                        isActive ? "bg-emerald-400 animate-pulse" : "bg-slate-600"
-                                                    )} />
-                                                    <span className={cn(
-                                                        "text-xs font-semibold",
-                                                        isActive ? "text-emerald-300" : "text-slate-400"
-                                                    )}>
-                                                        {isActive ? "Live" : "Not Live"}
-                                                    </span>
-                                                </div>
-                                            </td>
+                                                <td className="px-4 py-3">
+                                                    <button
+                                                        onClick={() => handleToggleUserActive(user.id, user.is_active)}
+                                                        disabled={togglingUserId === user.id}
+                                                        className={cn(
+                                                            "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2",
+                                                            user.is_active ? "bg-emerald-500" : "bg-slate-700",
+                                                            (isSuperAdmin || togglingUserId === user.id) && "opacity-50 cursor-not-allowed"
+                                                        )}
+                                                    >
+                                                        {togglingUserId === user.id ? (
+                                                            <SimpleSpinner size={10} />
+                                                        ) : (
+                                                            <span
+                                                                className={cn(
+                                                                    "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                                                                    user.is_active ? "translate-x-6" : "translate-x-1"
+                                                                )}
+                                                            />
+                                                        )}
+                                                    </button>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={cn(
+                                                            "w-2 h-2 rounded-full",
+                                                            isActive ? "bg-emerald-400 animate-pulse" : "bg-slate-600"
+                                                        )} />
+                                                        <span className={cn(
+                                                            "text-xs font-semibold",
+                                                            isActive ? "text-emerald-300" : "text-slate-400"
+                                                        )}>
+                                                            {isActive ? "Live" : "Not Live"}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3 text-xs text-slate-300">
+                                                    <Button
+                                                        variant="secondary"
+                                                        size="icon"
+                                                        className="bg-sky-500/20 hover:bg-sky-500/30 text-sky-300"
+                                                        onClick={() => {
+                                                            setSelectedUserDetails(user);
+                                                            setShowDetailsModal(true);
+                                                        }}
+                                                        title="View Full Details"
+                                                    >
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                </td>
                                             <td className="px-4 py-3 text-xs text-slate-300">
-                                                <Button
-                                                    variant="secondary"
-                                                    size="icon"
-                                                    className="bg-sky-500/20 hover:bg-sky-500/30 text-sky-300"
-                                                    onClick={() => {
-                                                        setSelectedUserDetails(user);
-                                                        setShowDetailsModal(true);
-                                                    }}
-                                                    title="View Full Details"
-                                                >
-                                                    <Eye className="h-4 w-4" />
-                                                </Button>
-                                            </td>
-                                            <td className="px-4 py-3 text-xs text-slate-300">
                                                 <div className="flex items-center gap-2">
-                                                    {isEditing ? (
-                                                        <>
-                                                            <Button
-                                                                variant="secondary"
-                                                                size="icon"
-                                                                className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300"
-                                                                onClick={() => handleSaveUserEdit(user.id)}
-                                                            >
-                                                                <X className="h-4 w-4 rotate-45" />
-                                                            </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="text-slate-400 hover:text-slate-200"
-                                                                onClick={() => {
-                                                                    setEditingUserId(null);
-                                                                    setEditForm({ userid: "", password: "" });
-                                                                }}
-                                                            >
-                                                                <X className="h-4 w-4" />
-                                                            </Button>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Button
-                                                                variant="secondary"
-                                                                size="icon"
-                                                                className="bg-slate-900 hover:bg-slate-800"
-                                                                onClick={() => handleEditUser(user)}
-                                                            >
-                                                                <Edit className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button
-                                                                variant="secondary"
-                                                                size="icon"
-                                                                className="bg-slate-900 hover:bg-slate-800"
-                                                                onClick={() => handleNotifyUser(user)}
-                                                                disabled={notifyingUserId === user.id}
-                                                            >
-                                                                {notifyingUserId === user.id ? <SimpleSpinner size={16} /> : <Send className="h-4 w-4" />}
-                                                            </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="text-slate-400 hover:text-rose-400 hover:bg-rose-500/10"
-                                                                disabled={isSuperAdmin || deletingUserId === user.id}
-                                                                onClick={() => handleDeleteUser(user.id)}
-                                                            >
-                                                                {deletingUserId === user.id ? <SimpleSpinner size={16} /> : <Trash2 className="h-4 w-4" />}
-                                                            </Button>
-                                                        </>
-                                                    )}
+                                                        {isEditing ? (
+                                                            <>
+                                                                <Button
+                                                                    variant="secondary"
+                                                                    size="icon"
+                                                                    className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300"
+                                                                    onClick={() => handleSaveUserEdit(user.id)}
+                                                                >
+                                                                    <X className="h-4 w-4 rotate-45" />
+                                                                </Button>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="text-slate-400 hover:text-slate-200"
+                                                                    onClick={() => {
+                                                                        setEditingUserId(null);
+                                                                        setEditForm({ userid: "", password: "" });
+                                                                    }}
+                                                                >
+                                                                    <X className="h-4 w-4" />
+                                                                </Button>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Button
+                                                                    variant="secondary"
+                                                                    size="icon"
+                                                                    className="bg-slate-900 hover:bg-slate-800"
+                                                                    onClick={() => handleEditUser(user)}
+                                                                >
+                                                                    <Edit className="h-4 w-4" />
+                                                                </Button>
+                                                    <Button
+                                                        variant="secondary"
+                                                        size="icon"
+                                                        className="bg-slate-900 hover:bg-slate-800"
+                                                        onClick={() => handleNotifyUser(user)}
+                                                        disabled={notifyingUserId === user.id}
+                                                    >
+                                                        {notifyingUserId === user.id ? <SimpleSpinner size={16} /> : <Send className="h-4 w-4" />}
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="text-slate-400 hover:text-rose-400 hover:bg-rose-500/10"
+                                                        disabled={isSuperAdmin || deletingUserId === user.id}
+                                                        onClick={() => handleDeleteUser(user.id)}
+                                                    >
+                                                        {deletingUserId === user.id ? <SimpleSpinner size={16} /> : <Trash2 className="h-4 w-4" />}
+                                                    </Button>
+                                                            </>
+                                                        )}
                                                 </div>
                                             </td>
                                         </tr>
@@ -1468,23 +1549,54 @@ export default function AdminPage() {
                         </table>
                     </div>
                 </div>
-            </section>
-        </div>
+                </section>
+            </div>
         );
     };
 
     // ─────────────────────────────────────────────────────────────────────────────
     // RENDER: Users Query Tab Content
     // ─────────────────────────────────────────────────────────────────────────────
-    const renderUsersQueryTab = () => {
+    // ─────────────────────────────────────────────────────────────────────────────
+    // COMPONENT: Users Query Tab
+    // ─────────────────────────────────────────────────────────────────────────────
+    const UsersQueryTab = ({
+        activeTab,
+    }: {
+        activeTab: AdminTab;
+    }) => {
         const [queryFilters, setQueryFilters] = useState<Record<string, string>>({});
         const [queryResults, setQueryResults] = useState<any[]>([]);
         const [isLoadingQuery, setIsLoadingQuery] = useState(false);
+        const [localUsers, setLocalUsers] = useState<UserRecord[]>([]);
+        const [localPendingUsers, setLocalPendingUsers] = useState<PendingUserRequestResponse[]>([]);
+        const [showApproveModal, setShowApproveModal] = useState(false);
+        const [selectedPendingUser, setSelectedPendingUser] = useState<any>(null);
+        const [approvePassword, setApprovePassword] = useState("");
+        const [approvingUserId, setApprovingUserId] = useState<number | null>(null);
+        const [rejectingUserId, setRejectingUserId] = useState<number | null>(null);
+        const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+        const prevActiveTabRef = useRef<AdminTab | null>(null);
 
-        const buildAllData = () => {
+        // Helper function to check if user is active
+        const isUserActiveNow = useCallback((user: UserRecord): boolean => {
+            if (!user.last_activity) return false;
+            try {
+                const lastActivityStr = user.last_activity.endsWith('Z') ? user.last_activity : user.last_activity + 'Z';
+                const lastActivity = new Date(lastActivityStr);
+                const now = new Date();
+                if (isNaN(lastActivity.getTime())) return false;
+                const diffSeconds = (now.getTime() - lastActivity.getTime()) / 1000;
+                return diffSeconds <= 120 && diffSeconds >= -60; // Active within 2 minutes
+            } catch {
+                return false;
+            }
+        }, []);
+
+        const buildAllData = useCallback(() => {
             return [
-                ...users.map(u => ({ ...u, type: 'user', request_status: null })),
-                ...pendingUsers.map(p => ({
+                ...localUsers.map(u => ({ ...u, type: 'user', request_status: null })),
+                ...localPendingUsers.map(p => ({
                     id: p.id,
                     userid: p.userid,
                     email: p.email || '',
@@ -1506,14 +1618,15 @@ export default function AdminPage() {
                     message: p.message
                 }))
             ];
-        };
+        }, [localUsers, localPendingUsers]);
+
 
         const handleQuery = () => {
             setIsLoadingQuery(true);
             const allData = buildAllData();
-            
+
             let filtered = allData;
-            
+
             if (queryFilters.name) {
                 filtered = filtered.filter(u => u.full_name?.toLowerCase().includes(queryFilters.name.toLowerCase()));
             }
@@ -1537,31 +1650,139 @@ export default function AdminPage() {
                 if (queryFilters.status === 'pending') {
                     filtered = filtered.filter(u => u.type === 'pending_request' && u.request_status === 'pending');
                 } else {
-                    filtered = filtered.filter(u => 
+                    filtered = filtered.filter(u =>
                         u.type === 'user' && (queryFilters.status === "active" ? u.is_active : !u.is_active)
                     );
                 }
             }
-            
+
             setQueryResults(filtered);
             setIsLoadingQuery(false);
         };
 
-        // Load pending users when tab is active and auto-query
-        useEffect(() => {
-            if (activeTab === "users_query") {
-                fetchPendingUsers();
-                fetchUsers();
+        // Handle approve pending user
+        const handleApprovePendingUser = async () => {
+            if (!selectedPendingUser || !approvePassword) {
+                setMessage({ type: "error", text: "Please enter a password for the new user." });
+                return;
             }
-        }, [activeTab]);
-
-        // Auto-query when data is loaded
-        useEffect(() => {
-            if (activeTab === "users_query" && (users.length > 0 || pendingUsers.length > 0)) {
-                const allData = buildAllData();
+            setApprovingUserId(selectedPendingUser.id);
+            setMessage(null);
+            try {
+                await api.post(`/admin/pending-users/${selectedPendingUser.id}/approve`, { password: approvePassword });
+                setShowApproveModal(false);
+                setApprovePassword("");
+                setSelectedPendingUser(null);
+                // Reload data
+                const [pendingResponse, usersResponse] = await Promise.all([
+                    api.get("/admin/pending-users", { timeout: 5000 }).catch(() => ({ data: [] })),
+                    api.get("/auth/users").catch(() => ({ data: [] }))
+                ]);
+                const updatedPendingUsers = pendingResponse.data || [];
+                const updatedUsers = (usersResponse.data || []).map((user: any) => ({
+                    ...user,
+                    last_activity: user.last_activity
+                        ? new Date(user.last_activity.endsWith('Z') ? user.last_activity : user.last_activity + 'Z').toISOString()
+                        : null
+                }));
+                setLocalPendingUsers(updatedPendingUsers);
+                setLocalUsers(updatedUsers);
+                setMessage({ type: "success", text: "User account created and enabled successfully." });
+                // Refresh query results with new data
+                const allData = [
+                    ...updatedUsers.map(u => ({ ...u, type: 'user', request_status: null })),
+                    ...updatedPendingUsers.map(p => ({
+                        id: p.id,
+                        userid: p.userid,
+                        email: p.email || '',
+                        full_name: p.full_name,
+                        phone_number: p.phone_number,
+                        age: p.age,
+                        address_line1: p.address_line1,
+                        address_line2: p.address_line2,
+                        city: p.city,
+                        state: p.state,
+                        postal_code: p.postal_code,
+                        country: p.country,
+                        role: 'pending',
+                        is_active: false,
+                        last_activity: null,
+                        created_at: p.created_at,
+                        type: 'pending_request',
+                        request_status: p.status,
+                        message: p.message
+                    }))
+                ];
                 setQueryResults(allData);
+            } catch (error: any) {
+                setMessage({
+                    type: "error",
+                    text: error.response?.data?.detail || "Failed to approve user request.",
+                });
+            } finally {
+                setApprovingUserId(null);
             }
-        }, [users, pendingUsers, activeTab]);
+        };
+
+        // Handle reject pending user
+        const handleRejectPendingUser = async (requestId: number) => {
+            setRejectingUserId(requestId);
+            setMessage(null);
+            try {
+                await api.post(`/admin/pending-users/${requestId}/reject`);
+                // Reload data
+                const [pendingResponse] = await Promise.all([
+                    api.get("/admin/pending-users", { timeout: 5000 }).catch(() => ({ data: [] }))
+                ]);
+                const updatedPendingUsers = pendingResponse.data || [];
+                setLocalPendingUsers(updatedPendingUsers);
+                setMessage({ type: "success", text: "User request rejected." });
+                // Refresh query results with new data
+                const allData = [
+                    ...localUsers.map(u => ({ ...u, type: 'user', request_status: null })),
+                    ...updatedPendingUsers.map(p => ({
+                        id: p.id,
+                        userid: p.userid,
+                        email: p.email || '',
+                        full_name: p.full_name,
+                        phone_number: p.phone_number,
+                        age: p.age,
+                        address_line1: p.address_line1,
+                        address_line2: p.address_line2,
+                        city: p.city,
+                        state: p.state,
+                        postal_code: p.postal_code,
+                        country: p.country,
+                        role: 'pending',
+                        is_active: false,
+                        last_activity: null,
+                        created_at: p.created_at,
+                        type: 'pending_request',
+                        request_status: p.status,
+                        message: p.message
+                    }))
+                ];
+                setQueryResults(allData);
+            } catch (error: any) {
+                setMessage({
+                    type: "error",
+                    text: error.response?.data?.detail || "Failed to reject user request.",
+                });
+            } finally {
+                setRejectingUserId(null);
+            }
+        };
+
+        // Reset state when leaving the tab
+        useEffect(() => {
+            if (activeTab !== "users_query" && prevActiveTabRef.current === "users_query") {
+                setQueryResults([]);
+                setLocalUsers([]);
+                setLocalPendingUsers([]);
+                setQueryFilters({});
+            }
+            prevActiveTabRef.current = activeTab;
+        }, [activeTab]);
 
         return (
             <div className="space-y-6">
@@ -1570,7 +1791,7 @@ export default function AdminPage() {
                         <Search className="h-5 w-5 text-sky-400" />
                         <h3 className="text-lg font-semibold">Query Users & Pending Requests</h3>
                     </div>
-                    
+
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                         <div>
                             <label className="text-xs uppercase text-slate-500 mb-1 block">Name</label>
@@ -1580,7 +1801,7 @@ export default function AdminPage() {
                                 className="bg-slate-900/50 border-slate-800 text-xs"
                                 placeholder="Filter by name"
                             />
-                        </div>
+                                </div>
                         <div>
                             <label className="text-xs uppercase text-slate-500 mb-1 block">Email</label>
                             <Input
@@ -1636,9 +1857,50 @@ export default function AdminPage() {
                             </select>
                         </div>
                     </div>
-                    
-                    <div className="flex gap-2">
-                        <Button onClick={handleQuery} className="bg-sky-500 hover:bg-sky-400" disabled={isLoadingQuery}>
+
+                    <div className="flex gap-2 items-center">
+                        <Button 
+                            variant="secondary" 
+                            className="bg-slate-800 hover:bg-slate-700 text-xs"
+                            onClick={async () => {
+                                setIsLoadingQuery(true);
+                                try {
+                                    // Fetch data and store locally - don't use parent state
+                                    const [pendingResponse, usersResponse] = await Promise.all([
+                                        api.get("/admin/pending-users", { timeout: 5000 }).catch(() => ({ data: [] })),
+                                        api.get("/auth/users").catch(() => ({ data: [] }))
+                                    ]);
+                                    setLocalPendingUsers(pendingResponse.data || []);
+                                    const usersWithActivity = (usersResponse.data || []).map((user: any) => ({
+                                        ...user,
+                                        last_activity: user.last_activity
+                                            ? new Date(user.last_activity.endsWith('Z') ? user.last_activity : user.last_activity + 'Z').toISOString()
+                                            : null
+                                    }));
+                                    setLocalUsers(usersWithActivity);
+                                } finally {
+                                    setIsLoadingQuery(false);
+                                }
+                            }}
+                            disabled={isLoadingQuery}
+                        >
+                            {isLoadingQuery ? (
+                                <>
+                                    <SimpleSpinner size={16} className="mr-1" />
+                                    Loading...
+                                </>
+                            ) : (
+                                <>
+                                    <RefreshCw className="h-4 w-4 mr-1" />
+                                    Load Data
+                                </>
+                            )}
+                        </Button>
+                        <Button 
+                            onClick={handleQuery} 
+                            className="bg-sky-500 hover:bg-sky-400" 
+                            disabled={isLoadingQuery || (localUsers.length === 0 && localPendingUsers.length === 0)}
+                        >
                             {isLoadingQuery ? (
                                 <>
                                     <SimpleSpinner size={16} className="mr-2" />
@@ -1658,16 +1920,38 @@ export default function AdminPage() {
                                 const allData = buildAllData();
                                 setQueryResults(allData);
                             }}
+                            disabled={localUsers.length === 0 && localPendingUsers.length === 0}
                         >
                             Show All
                         </Button>
                     </div>
                 </div>
 
+                {message && (
+                    <div className={cn(
+                        "glass-panel rounded-xl border p-4",
+                        message.type === "success" 
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                            : "border-rose-500/30 bg-rose-500/10 text-rose-200"
+                    )}>
+                        <p className="text-sm">{message.text}</p>
+                    </div>
+                )}
+
                 {queryResults.length > 0 ? (
                     <div className="glass-panel rounded-xl border border-slate-800 p-4">
-                        <h4 className="text-sm font-semibold mb-4">Query Results ({queryResults.length})</h4>
-                        <div className="overflow-auto">
+                        <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-sm font-semibold">Query Results ({queryResults.length})</h4>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                className="bg-slate-800 hover:bg-slate-700 text-xs"
+                                onClick={() => setQueryResults([])}
+                            >
+                                Clear Results
+                            </Button>
+                        </div>
+                        <div className="overflow-x-auto">
                             <table className="min-w-full text-sm divide-y divide-slate-800">
                                 <thead className="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-500">
                                     <tr>
@@ -1676,48 +1960,49 @@ export default function AdminPage() {
                                         <th className="px-4 py-3 text-left">Email</th>
                                         <th className="px-4 py-3 text-left">UserID</th>
                                         <th className="px-4 py-3 text-left">Phone</th>
-                                        <th className="px-4 py-3 text-left">Age</th>
                                         <th className="px-4 py-3 text-left">Role/Status</th>
                                         <th className="px-4 py-3 text-left">Account Status</th>
                                         <th className="px-4 py-3 text-left">Activity</th>
-                                        <th className="px-4 py-3 text-left">Last Activity</th>
                                         <th className="px-4 py-3 text-left">Requested At</th>
-                                        <th className="px-4 py-3 text-left">Message</th>
+                                        <th className="px-4 py-3 text-left">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-900">
                                     {queryResults.map((item) => {
-                                        // Recalculate activity status on each render for real-time updates
                                         const isActive = item.type === 'user' ? isUserActiveNow(item) : false;
                                         const isPendingRequest = item.type === 'pending_request';
-                                        // Use activityUpdateTrigger to force re-calculation
-                                        void activityUpdateTrigger;
                                         return (
                                             <tr key={`${item.type}-${item.id}`} className="hover:bg-slate-900/40">
                                                 <td className="px-4 py-3">
                                                     <span className={cn(
                                                         "px-2 py-0.5 rounded-full text-xs font-semibold",
-                                                        isPendingRequest 
+                                                        isPendingRequest
                                                             ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
                                                             : "bg-sky-500/15 text-sky-300 border border-sky-500/30"
                                                     )}>
-                                                        {isPendingRequest ? "Pending" : "User"}
+                                                        {isPendingRequest ? "Request" : "User"}
                                                     </span>
                                                 </td>
-                                                <td className="px-4 py-3">{item.full_name || "—"}</td>
+                                                <td className="px-4 py-3">
+                                                    <div>
+                                                        <p className="font-medium text-white">{item.full_name || "—"}</p>
+                                                        {item.age && <p className="text-xs text-slate-400">Age: {item.age}</p>}
+                                                    </div>
+                                                </td>
                                                 <td className="px-4 py-3 text-xs">{item.email || "—"}</td>
-                                                <td className="px-4 py-3 text-xs font-mono">{item.userid || "—"}</td>
+                                                <td className="px-4 py-3">
+                                                    <span className="text-xs font-mono text-sky-300">{item.userid || "—"}</span>
+                                                </td>
                                                 <td className="px-4 py-3 text-xs">{item.phone_number || "—"}</td>
-                                                <td className="px-4 py-3 text-xs">{item.age || "—"}</td>
                                                 <td className="px-4 py-3">
                                                     {isPendingRequest ? (
                                                         <span className={cn(
-                                                            "px-2 py-0.5 rounded-full text-xs",
-                                                            item.request_status === 'pending' 
-                                                                ? "bg-amber-500/15 text-amber-300" 
+                                                            "px-2 py-0.5 rounded-full text-xs font-medium",
+                                                            item.request_status === 'pending'
+                                                                ? "bg-amber-500/15 text-amber-300"
                                                                 : item.request_status === 'approved'
-                                                                ? "bg-emerald-500/15 text-emerald-300"
-                                                                : "bg-rose-500/15 text-rose-300"
+                                                                    ? "bg-emerald-500/15 text-emerald-300"
+                                                                    : "bg-rose-500/15 text-rose-300"
                                                         )}>
                                                             {item.request_status || 'pending'}
                                                         </span>
@@ -1734,7 +2019,7 @@ export default function AdminPage() {
                                                         </span>
                                                     ) : (
                                                         <span className={cn(
-                                                            "px-2 py-0.5 rounded-full text-xs",
+                                                            "px-2 py-0.5 rounded-full text-xs font-medium",
                                                             item.is_active ? "bg-emerald-500/15 text-emerald-300" : "bg-slate-800 text-slate-400"
                                                         )}>
                                                             {item.is_active ? "Enabled" : "Disabled"}
@@ -1747,8 +2032,8 @@ export default function AdminPage() {
                                                     ) : (
                                                         <div className="flex items-center gap-2">
                                                             <div className={cn(
-                                                                "w-2 h-2 rounded-full animate-pulse",
-                                                                isActive ? "bg-emerald-400" : "bg-slate-600"
+                                                                "w-2 h-2 rounded-full",
+                                                                isActive ? "bg-emerald-400 animate-pulse" : "bg-slate-600"
                                                             )} />
                                                             <span className={cn(
                                                                 "text-xs font-semibold",
@@ -1760,13 +2045,41 @@ export default function AdminPage() {
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3 text-xs text-slate-400">
-                                                    {item.last_activity ? new Date(item.last_activity).toLocaleString() : "Never"}
-                                                </td>
-                                                <td className="px-4 py-3 text-xs text-slate-400">
                                                     {item.created_at ? new Date(item.created_at).toLocaleString() : "—"}
                                                 </td>
-                                                <td className="px-4 py-3 text-xs text-slate-400 max-w-xs truncate">
-                                                    {item.message || "—"}
+                                                <td className="px-4 py-3">
+                                                    {isPendingRequest && item.request_status === 'pending' ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <Button
+                                                                variant="secondary"
+                                                                size="icon"
+                                                                className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 h-7 w-7"
+                                                                onClick={() => {
+                                                                    setSelectedPendingUser(item);
+                                                                    setShowApproveModal(true);
+                                                                }}
+                                                                title="Approve Request"
+                                                            >
+                                                                <Check className="h-3.5 w-3.5" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="secondary"
+                                                                size="icon"
+                                                                className="bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 h-7 w-7"
+                                                                onClick={() => handleRejectPendingUser(item.id)}
+                                                                disabled={rejectingUserId === item.id}
+                                                                title="Reject Request"
+                                                            >
+                                                                {rejectingUserId === item.id ? (
+                                                                    <SimpleSpinner size={14} />
+                                                                ) : (
+                                                                    <X className="h-3.5 w-3.5" />
+                                                                )}
+                                                            </Button>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-xs text-slate-500">—</span>
+                                                    )}
                                                 </td>
                                             </tr>
                                         );
@@ -1775,14 +2088,95 @@ export default function AdminPage() {
                             </table>
                         </div>
                     </div>
+                ) : localUsers.length === 0 && localPendingUsers.length === 0 ? (
+                    <div className="glass-panel rounded-xl border border-slate-800 p-8 text-center">
+                        <Search className="h-12 w-12 text-slate-600 mx-auto mb-4" />
+                        <p className="text-slate-400 text-sm mb-2">No data loaded yet.</p>
+                        <p className="text-slate-500 text-xs">Click "Load Data" to fetch users and pending requests.</p>
+                    </div>
                 ) : (
                     <div className="glass-panel rounded-xl border border-slate-800 p-8 text-center">
-                        <p className="text-slate-400 text-sm">No results found. Try adjusting your filters or click "Show All" to see all users and pending requests.</p>
+                        <p className="text-slate-400 text-sm">No results found. Try adjusting your filters or click "Show All".</p>
+                    </div>
+                )}
+
+                {/* Approve User Modal */}
+                {showApproveModal && selectedPendingUser && (
+                    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <div className="glass-panel w-full max-w-md rounded-xl border border-slate-700/50 p-6 space-y-4 bg-slate-950">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-semibold text-white">Approve User Request</h3>
+                                <button
+                                    onClick={() => {
+                                        setShowApproveModal(false);
+                                        setSelectedPendingUser(null);
+                                        setApprovePassword("");
+                                    }}
+                                    className="text-slate-400 hover:text-white"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+                            <div className="space-y-3">
+                                <div>
+                                    <p className="text-sm text-slate-400">User: <span className="text-white">{selectedPendingUser.full_name}</span></p>
+                                    <p className="text-sm text-slate-400">Email: <span className="text-white">{selectedPendingUser.email}</span></p>
+                                    <p className="text-sm text-slate-400">UserID: <span className="text-white font-mono">{selectedPendingUser.userid}</span></p>
+                                </div>
+                                <div>
+                                    <label className="text-xs uppercase text-slate-500 mb-1 block">Set Password <span className="text-rose-400">*</span></label>
+                                    <Input
+                                        type="password"
+                                        value={approvePassword}
+                                        onChange={(e) => setApprovePassword(e.target.value)}
+                                        className="bg-slate-900/50 border-slate-700 text-white"
+                                        placeholder="Enter password for new user"
+                                        required
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => {
+                                        setShowApproveModal(false);
+                                        setSelectedPendingUser(null);
+                                        setApprovePassword("");
+                                    }}
+                                    className="flex-1 bg-slate-800 hover:bg-slate-700"
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handleApprovePendingUser}
+                                    disabled={!approvePassword || approvingUserId === selectedPendingUser.id}
+                                    className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-white"
+                                >
+                                    {approvingUserId === selectedPendingUser.id ? (
+                                        <>
+                                            <SimpleSpinner size={16} className="mr-2" />
+                                            Creating...
+                                        </>
+                                    ) : (
+                                        "Approve & Create"
+                                    )}
+                                </Button>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>
         );
     };
+
+    // Memoize the component to prevent unnecessary re-renders when parent updates
+    // Use the memoized functions directly - no need for wrapper
+    // The functions are already stable if we memoize them properly
+
+    const MemoizedUsersQueryTab = memo(UsersQueryTab, (prevProps, nextProps) => {
+        // Only re-render if activeTab changes
+        return prevProps.activeTab === nextProps.activeTab;
+    });
 
     // ─────────────────────────────────────────────────────────────────────────────
     // RENDER: Logs Tab Content
@@ -2319,6 +2713,11 @@ export default function AdminPage() {
                     {activeTab === "symbols" && renderSymbolsTab()}
                     {activeTab === "logs" && renderLogsTab()}
                     {activeTab === "accounts" && renderAccountsTab()}
+                    {activeTab === "users_query" && (
+                        <MemoizedUsersQueryTab
+                            activeTab={activeTab}
+                        />
+                    )}
                     {activeTab === "feedback" && renderFeedbackTab()}
                     {activeTab === "connections" && renderConnectionsTab()}
                 </div>
@@ -2351,7 +2750,7 @@ export default function AdminPage() {
                         )}
                         <form className="space-y-4" onSubmit={handleCreateUser}>
                             <div>
-                                <label className="text-xs uppercase text-slate-500">Email</label>
+                                <label className="text-xs uppercase text-slate-500">Email <span className="text-rose-400">*</span></label>
                                 <Input
                                     type="email"
                                     required
@@ -2362,7 +2761,7 @@ export default function AdminPage() {
                                 />
                             </div>
                             <div>
-                                <label className="text-xs uppercase text-slate-500">Password</label>
+                                <label className="text-xs uppercase text-slate-500">Password <span className="text-rose-400">*</span></label>
                                 <Input
                                     type="password"
                                     required
@@ -2374,8 +2773,9 @@ export default function AdminPage() {
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="text-xs uppercase text-slate-500">Full Name</label>
+                                    <label className="text-xs uppercase text-slate-500">Full Name <span className="text-rose-400">*</span></label>
                                     <Input
+                                        required
                                         value={createForm.full_name}
                                         onChange={(e) => setCreateForm((prev) => ({ ...prev, full_name: e.target.value }))}
                                         className="bg-slate-900/50 border-slate-800 mt-1"
@@ -2984,7 +3384,7 @@ export default function AdminPage() {
                             <div>
                                 <p className="text-xs uppercase text-slate-500 mb-1">Last Activity</p>
                                 <p className="text-white">
-                                    {selectedUserDetails.last_activity 
+                                    {selectedUserDetails.last_activity
                                         ? new Date(selectedUserDetails.last_activity).toLocaleString()
                                         : "Never"}
                                 </p>
@@ -3012,7 +3412,7 @@ export default function AdminPage() {
                             <div>
                                 <p className="text-xs uppercase text-slate-500 mb-1">Created At</p>
                                 <p className="text-white">
-                                    {selectedUserDetails.created_at 
+                                    {selectedUserDetails.created_at
                                         ? new Date(selectedUserDetails.created_at).toLocaleString()
                                         : "—"}
                                 </p>

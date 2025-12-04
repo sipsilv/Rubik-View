@@ -104,6 +104,18 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     return db_user
 
+@router.post("/logout")
+async def logout(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Logout user and clear activity status"""
+    # Set last_activity to a past date to mark as inactive immediately
+    current_user.last_activity = datetime.utcnow() - timedelta(hours=1)
+    db.add(current_user)
+    db.commit()
+    return {"message": "Logged out successfully"}
+
 @router.post("/token", response_model=schemas.Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     try:

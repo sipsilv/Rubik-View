@@ -44,36 +44,63 @@ def migrate_userids():
     finally:
         conn.close()
     
-    # Step 2: Create pending_user_requests table if it doesn't exist
-    print("\nStep 2: Creating pending_user_requests table...")
+    # Step 2: Create pending_user_requests table if it doesn't exist, or add missing columns
+    print("\nStep 2: Creating/updating pending_user_requests table...")
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
     try:
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS pending_user_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                userid VARCHAR UNIQUE NOT NULL,
-                full_name VARCHAR,
-                email VARCHAR,
-                phone_number VARCHAR,
-                age INTEGER,
-                address_line1 VARCHAR,
-                address_line2 VARCHAR,
-                city VARCHAR,
-                state VARCHAR,
-                postal_code VARCHAR,
-                country VARCHAR,
-                telegram_chat_id VARCHAR,
-                message VARCHAR,
-                status VARCHAR DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-        print("  ✅ pending_user_requests table ready")
+        # First, check if table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pending_user_requests'")
+        table_exists = cursor.fetchone() is not None
+        
+        if not table_exists:
+            # Create table with all columns
+            cursor.execute("""
+                CREATE TABLE pending_user_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    userid VARCHAR UNIQUE NOT NULL,
+                    full_name VARCHAR,
+                    email VARCHAR,
+                    phone_number VARCHAR,
+                    age INTEGER,
+                    address_line1 VARCHAR,
+                    address_line2 VARCHAR,
+                    city VARCHAR,
+                    state VARCHAR,
+                    postal_code VARCHAR,
+                    country VARCHAR,
+                    telegram_chat_id VARCHAR,
+                    message VARCHAR,
+                    status VARCHAR DEFAULT 'pending',
+                    user_id INTEGER,
+                    resolved_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            """)
+            conn.commit()
+            print("  ✅ pending_user_requests table created")
+        else:
+            # Table exists, check and add missing columns
+            cursor.execute("PRAGMA table_info(pending_user_requests)")
+            existing_cols = {col[1] for col in cursor.fetchall()}
+            
+            if "user_id" not in existing_cols:
+                print("  - Adding user_id column...")
+                cursor.execute("ALTER TABLE pending_user_requests ADD COLUMN user_id INTEGER")
+                conn.commit()
+                print("  ✅ user_id column added")
+            
+            if "resolved_at" not in existing_cols:
+                print("  - Adding resolved_at column...")
+                cursor.execute("ALTER TABLE pending_user_requests ADD COLUMN resolved_at TIMESTAMP")
+                conn.commit()
+                print("  ✅ resolved_at column added")
+            
+            print("  ✅ pending_user_requests table ready")
     except Exception as e:
-        print(f"  ❌ Error creating table: {e}")
+        print(f"  ❌ Error creating/updating table: {e}")
         conn.rollback()
     finally:
         conn.close()

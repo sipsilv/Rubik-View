@@ -45,8 +45,8 @@ export function AppLayout({ children }: AppLayoutProps) {
 
         updateActivity();
 
-        // Update activity every 30 seconds
-        const interval = setInterval(updateActivity, 30000);
+        // Update activity less frequently to reduce server load
+        const interval = setInterval(updateActivity, 120000); // Every 2 minutes instead of 30 seconds
 
         return () => clearInterval(interval);
     }, [isLoginPage]);

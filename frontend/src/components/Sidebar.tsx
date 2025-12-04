@@ -156,7 +156,11 @@ const Sidebar = () => {
             <div className="mt-auto pt-2 border-t border-slate-800/50 relative">
                 <button
                     onClick={() => {
-                        import("@/lib/auth").then(({ logout }) => logout());
+                        import("@/lib/api").then(({ default: api }) => {
+                            api.post("/auth/logout").finally(() => {
+                                import("@/lib/auth").then(({ logout }) => logout());
+                            });
+                        });
                     }}
                     className={cn(
                         "flex w-full items-center gap-2 rounded-lg border border-slate-800/40 px-2 py-1.5 text-[12px] font-medium text-slate-400 transition-all hover:bg-rose-500/10 hover:border-rose-500/40 hover:text-rose-300",

@@ -615,7 +615,7 @@ async def list_pending_users(
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None),
 ):
-    """List all pending user registration requests"""
+    """List pending user registration requests. If status is None, returns all requests."""
     query = db.query(models.PendingUserRequest)
     if status:
         query = query.filter(models.PendingUserRequest.status == status)
@@ -685,13 +685,14 @@ async def approve_pending_user(
         postal_code=pending_request.postal_code,
         country=pending_request.country,
         telegram_chat_id=pending_request.telegram_chat_id,
-        is_active=True,
+        is_active=False,  # Created as inactive, admin must enable manually
     )
     
     db.add(new_user)
     
     # Mark request as approved
     pending_request.status = "approved"
+    pending_request.user = new_user
     db.add(pending_request)
     
     db.commit()
