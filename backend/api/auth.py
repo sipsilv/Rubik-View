@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 import schemas
-from core import change_requests, database, models, notifications, otp, security
+from core import change_requests, database, models, notifications, otp, security, user_utils
 from core.config import settings
 
 router = APIRouter()
@@ -37,6 +37,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     user = db.query(models.User).filter(models.User.email == token_data.email).first()
     if user is None:
         raise credentials_exception
+    
+    # Update last activity timestamp on each authenticated request
+    user.last_activity = datetime.utcnow()
+    db.add(user)
+    db.commit()
+    
     return user
 
 def require_admin(current_user: models.User = Depends(get_current_user)):
@@ -101,7 +107,17 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 @router.post("/token", response_model=schemas.Token)
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     try:
-        user = db.query(models.User).filter(models.User.email == form_data.username).first()
+        # Try to find user by email, userid, or phone_number
+        username = form_data.username.strip()
+        user = (
+            db.query(models.User)
+            .filter(
+                (models.User.email == username) |
+                (models.User.userid == username) |
+                (models.User.phone_number == username)
+            )
+            .first()
+        )
 
         if not user:
             raise HTTPException(
@@ -125,6 +141,11 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
                 detail="Incorrect username or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        
+        # Update last activity timestamp
+        user.last_activity = datetime.utcnow()
+        db.add(user)
+        db.commit()
         
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = security.create_access_token(
@@ -274,8 +295,12 @@ async def admin_create_user(
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    # Generate unique userid if not provided (using name and mobile)
+    userid = user_utils.generate_unique_userid(db, full_name=user.full_name, phone_number=user.phone_number)
+
     hashed_password = security.get_password_hash(user.password)
     db_user = models.User(
+        userid=userid,
         email=user.email,
         hashed_password=hashed_password,
         full_name=user.full_name,
@@ -296,13 +321,19 @@ async def admin_create_user(
     return db_user
 
 @router.put("/users/{user_id}", response_model=schemas.UserDetail)
-async def admn_update_user(
+async def admin_update_user(
     user_id: int,
     payload: schemas.AdminUserUpdate,
     _: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     user = _get_user_by_id(db, user_id)
+
+    # Handle userid change with uniqueness check
+    if payload.userid is not None and payload.userid != user.userid:
+        if not user_utils.check_userid_unique(db, payload.userid, exclude_user_id=user_id):
+            raise HTTPException(status_code=400, detail=f"UserID '{payload.userid}' is already taken")
+        user.userid = payload.userid
 
     _apply_profile_updates(user, payload)
     if payload.role:
@@ -344,6 +375,43 @@ async def delete_user(
 
 
 # ========== User Feedback Endpoints ==========
+
+@router.post("/contact-admin", response_model=schemas.PendingUserRequestResponse, status_code=status.HTTP_201_CREATED)
+async def contact_admin(
+    request: schemas.ContactAdminRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Public endpoint for users to request account creation.
+    Creates a pending user request with auto-generated unique userid.
+    """
+    # Generate unique userid based on name and mobile
+    userid = user_utils.generate_unique_userid(db, full_name=request.full_name, phone_number=request.phone_number)
+    
+    # Create pending user request
+    pending_request = models.PendingUserRequest(
+        userid=userid,
+        full_name=request.full_name,
+        email=request.email,
+        phone_number=request.phone_number,
+        age=request.age,
+        address_line1=request.address_line1,
+        address_line2=request.address_line2,
+        city=request.city,
+        state=request.state,
+        postal_code=request.postal_code,
+        country=request.country,
+        telegram_chat_id=request.telegram_chat_id,
+        message=request.message,
+        status="pending",
+    )
+    
+    db.add(pending_request)
+    db.commit()
+    db.refresh(pending_request)
+    
+    return pending_request
+
 
 @router.post("/feedback", response_model=schemas.UserFeedbackResponse, status_code=status.HTTP_201_CREATED)
 async def create_feedback(

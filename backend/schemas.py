@@ -26,6 +26,7 @@ class UserLogin(UserBase):
 
 class User(UserBase):
     id: int
+    userid: Optional[str] = None
     is_active: bool
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
@@ -38,6 +39,7 @@ class User(UserBase):
     country: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     role: str
+    last_activity: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -48,6 +50,7 @@ class UserDetail(User):
     updated_at: Optional[datetime] = None
 
 class AdminUserUpdate(BaseModel):
+    userid: Optional[str] = None  # Allow changing userid
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
     age: Optional[int] = None
@@ -253,6 +256,45 @@ class JobScheduleResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     created_by: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Pending User Request Schemas
+class ContactAdminRequest(BaseModel):
+    full_name: str  # Required
+    email: str  # Required
+    phone_number: str  # Required
+    age: int  # Required
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    message: Optional[str] = None
+
+
+class PendingUserRequestResponse(BaseModel):
+    id: int
+    userid: str
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    age: Optional[int] = None
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    message: Optional[str] = None
+    status: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

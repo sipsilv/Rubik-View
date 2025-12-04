@@ -7,6 +7,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    userid = Column(String, unique=True, index=True, nullable=True)  # Unique user ID
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     is_active = Column(Boolean, default=True)
@@ -21,6 +22,7 @@ class User(Base):
     postal_code = Column(String, nullable=True)
     country = Column(String, nullable=True)
     telegram_chat_id = Column(String, nullable=True)
+    last_activity = Column(DateTime, nullable=True)  # Track last activity timestamp
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -115,3 +117,26 @@ class UserFeedback(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User")
+
+
+class PendingUserRequest(Base):
+    """Pending user registration requests from Contact Admin form"""
+    __tablename__ = "pending_user_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    userid = Column(String, unique=True, index=True, nullable=False)  # Auto-generated unique userid
+    full_name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    phone_number = Column(String, nullable=True)
+    age = Column(Integer, nullable=True)
+    address_line1 = Column(String, nullable=True)
+    address_line2 = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    state = Column(String, nullable=True)
+    postal_code = Column(String, nullable=True)
+    country = Column(String, nullable=True)
+    telegram_chat_id = Column(String, nullable=True)
+    message = Column(String, nullable=True)  # Additional message from user
+    status = Column(String, default="pending")  # "pending", "approved", "rejected"
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

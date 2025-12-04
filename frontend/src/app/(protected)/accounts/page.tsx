@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 type Profile = {
     id: number;
+    userid?: string;
     email: string;
     full_name?: string;
     phone_number?: string;
@@ -250,11 +251,13 @@ export default function AccountsPage() {
                             <p className="text-xs uppercase text-slate-500 tracking-[0.15em] mb-1">Login Details</p>
                             <h3 className="text-lg font-semibold text-white">{profile.email}</h3>
                             <p className="text-sm text-slate-400">
+                                UserID: <span className="font-mono tracking-widest text-slate-200">{profile.userid || "—"}</span>
+                            </p>
+                            <p className="text-sm text-slate-400">
                                 Password: <span className="font-mono tracking-widest text-slate-200">••••••••</span> (hidden for security)
                             </p>
                             <div className="mt-2 inline-flex items-center gap-2 text-xs text-slate-400">
                                 <span className="px-2 py-0.5 rounded-full border border-sky-500/40 bg-sky-500/10 text-sky-200">{profile.role}</span>
-                                <span className="text-slate-500">User ID visible above</span>
                             </div>
                         </div>
                         <div className="flex flex-col gap-2 w-full md:w-auto">

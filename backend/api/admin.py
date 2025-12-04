@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 import json
 
 import schemas
-from core import jobs, models, log_db
+from core import jobs, models, log_db, user_utils, security
+from pydantic import BaseModel
 # scheduler  # Temporarily disabled
 try:
     from ..core import scheduler
@@ -605,3 +606,114 @@ async def delete_schedule(
     db.commit()
     
     return None
+
+
+# Pending User Request Endpoints
+@router.get("/pending-users", response_model=List[schemas.PendingUserRequestResponse])
+async def list_pending_users(
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+    status: Optional[str] = Query(None),
+):
+    """List all pending user registration requests"""
+    query = db.query(models.PendingUserRequest)
+    if status:
+        query = query.filter(models.PendingUserRequest.status == status)
+    return query.order_by(models.PendingUserRequest.created_at.desc()).all()
+
+
+@router.get("/pending-users/{request_id}", response_model=schemas.PendingUserRequestResponse)
+async def get_pending_user(
+    request_id: int,
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Get a specific pending user request"""
+    request = db.query(models.PendingUserRequest).filter(models.PendingUserRequest.id == request_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="Pending user request not found")
+    return request
+
+
+class ApprovePendingUserRequest(BaseModel):
+    password: str
+
+@router.post("/pending-users/{request_id}/approve", response_model=schemas.UserDetail, status_code=status.HTTP_201_CREATED)
+async def approve_pending_user(
+    request_id: int,
+    payload: ApprovePendingUserRequest,
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Approve a pending user request and create the user account"""
+    from core import security
+    
+    pending_request = db.query(models.PendingUserRequest).filter(models.PendingUserRequest.id == request_id).first()
+    if not pending_request:
+        raise HTTPException(status_code=404, detail="Pending user request not found")
+    
+    if pending_request.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Request is already {pending_request.status}")
+    
+    # Check if email already exists
+    if pending_request.email:
+        existing_user = db.query(models.User).filter(models.User.email == pending_request.email).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Verify userid is still unique
+    if not user_utils.check_userid_unique(db, pending_request.userid):
+        # Generate new userid if conflict (using name and mobile)
+        pending_request.userid = user_utils.generate_unique_userid(db, full_name=pending_request.full_name, phone_number=pending_request.phone_number)
+    
+    # Create user account
+    hashed_password = security.get_password_hash(payload.password)
+    # Use userid as email if no email provided (userid is alphanumeric, no @ required)
+    user_email = pending_request.email if pending_request.email else f"{pending_request.userid}@rubikview.local"
+    new_user = models.User(
+        userid=pending_request.userid,
+        email=user_email,
+        hashed_password=hashed_password,
+        full_name=pending_request.full_name,
+        role="user",
+        phone_number=pending_request.phone_number,
+        age=pending_request.age,
+        address_line1=pending_request.address_line1,
+        address_line2=pending_request.address_line2,
+        city=pending_request.city,
+        state=pending_request.state,
+        postal_code=pending_request.postal_code,
+        country=pending_request.country,
+        telegram_chat_id=pending_request.telegram_chat_id,
+        is_active=True,
+    )
+    
+    db.add(new_user)
+    
+    # Mark request as approved
+    pending_request.status = "approved"
+    db.add(pending_request)
+    
+    db.commit()
+    db.refresh(new_user)
+    
+    return new_user
+
+
+@router.post("/pending-users/{request_id}/reject", response_model=schemas.PendingUserRequestResponse)
+async def reject_pending_user(
+    request_id: int,
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Reject a pending user request"""
+    pending_request = db.query(models.PendingUserRequest).filter(models.PendingUserRequest.id == request_id).first()
+    if not pending_request:
+        raise HTTPException(status_code=404, detail="Pending user request not found")
+    
+    pending_request.status = "rejected"
+    db.add(pending_request)
+    db.commit()
+    db.refresh(pending_request)
+    
+    return pending_request

@@ -26,6 +26,7 @@ import {
     Edit,
     Filter,
     Search,
+    Eye,
 } from "lucide-react";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -37,13 +38,22 @@ import { Input } from "@/components/ui/input";
 
 type UserRecord = {
     id: number;
+    userid?: string;
     email: string;
     full_name?: string;
     role: string;
     phone_number?: string;
     state?: string;
     country?: string;
+    city?: string;
+    postal_code?: string;
+    address_line1?: string;
+    address_line2?: string;
+    age?: number;
     is_active: boolean;
+    last_activity?: string;
+    created_at?: string;
+    updated_at?: string;
 };
 
 type ChangeRequest = {
@@ -79,7 +89,6 @@ type CreateForm = {
     country: string;
     city: string;
     postal_code: string;
-    telegram_chat_id: string;
 };
 
 const jobMeta = {
@@ -99,14 +108,15 @@ const jobMeta = {
 
 const SUPER_ADMIN_EMAIL = "jallusandeep@rubikview.com";
 
-type AdminTab = "processors" | "symbols" | "accounts" | "feedback" | "connections" | "logs";
+type AdminTab = "processors" | "symbols" | "accounts" | "users_query" | "feedback" | "connections" | "logs";
 
 const adminTabs: { key: AdminTab; label: string; description: string; icon: typeof Cpu }[] = [
     { key: "processors", label: "Processors", description: "OHCLV & Signals Management", icon: Cpu },
     { key: "symbols", label: "Symbols", description: "Stock symbols management", icon: Activity },
     { key: "connections", label: "Connections", description: "External integrations & APIs", icon: Link2 },
     { key: "logs", label: "Logs", description: "System, User & Job Logs", icon: Terminal },
-    { key: "accounts", label: "Accounts", description: "User management & requests", icon: Users },
+    { key: "accounts", label: "Accounts", description: "User management", icon: Users },
+    { key: "users_query", label: "Users Query", description: "Query and filter user details", icon: Search },
     { key: "feedback", label: "Feedback & Requests", description: "User feedback submissions", icon: MessageSquarePlus },
 ];
 
@@ -128,6 +138,21 @@ export default function AdminPage() {
     const [userMessage, setUserMessage] = useState<MessageState>(null);
     const [deletingUserId, setDeletingUserId] = useState<number | null>(null);
     const [notifyingUserId, setNotifyingUserId] = useState<number | null>(null);
+    const [editingUserId, setEditingUserId] = useState<number | null>(null);
+    const [editForm, setEditForm] = useState({
+        userid: "",
+        password: "",
+    });
+    const [togglingUserId, setTogglingUserId] = useState<number | null>(null);
+    const [pendingUsers, setPendingUsers] = useState<any[]>([]);
+    const [approvingUserId, setApprovingUserId] = useState<number | null>(null);
+    const [approvePassword, setApprovePassword] = useState("");
+    const [showApproveModal, setShowApproveModal] = useState(false);
+    const [selectedPendingUser, setSelectedPendingUser] = useState<any>(null);
+    const [showDetailsModal, setShowDetailsModal] = useState(false);
+    const [selectedUserDetails, setSelectedUserDetails] = useState<UserRecord | null>(null);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [accountFilters, setAccountFilters] = useState<Record<string, string>>({});
 
     type OhlcvStatus = {
         job_id?: number | null;
@@ -229,7 +254,6 @@ export default function AdminPage() {
         country: "",
         city: "",
         postal_code: "",
-        telegram_chat_id: "",
     });
 
     // Logs tab state - moved to top level to fix hooks error
@@ -259,11 +283,42 @@ export default function AdminPage() {
     const fetchUsers = async () => {
         try {
             const response = await api.get("/auth/users");
-            setUsers(response.data);
+            // Ensure last_activity is properly parsed
+            const usersWithActivity = response.data.map((user: any) => ({
+                ...user,
+                last_activity: user.last_activity ? new Date(user.last_activity).toISOString() : null
+            }));
+            setUsers(usersWithActivity);
         } catch (error) {
             console.error("Failed to load users", error);
         }
     };
+
+    // State to force re-render for real-time activity updates
+    const [activityUpdateTrigger, setActivityUpdateTrigger] = useState(0);
+
+    // Real-time activity status updates
+    useEffect(() => {
+        if (activeTab !== "accounts" && activeTab !== "users_query") return;
+        
+        // Initial fetch
+        fetchUsers();
+        if (activeTab === "users_query") {
+            fetchPendingUsers();
+        }
+        
+        // Update more frequently for real-time activity status
+        const interval = setInterval(() => {
+            fetchUsers();
+            if (activeTab === "users_query") {
+                fetchPendingUsers();
+            }
+            // Force re-render to update activity status
+            setActivityUpdateTrigger(prev => prev + 1);
+        }, 10000); // Update every 10 seconds for real-time status
+
+        return () => clearInterval(interval);
+    }, [activeTab]);
 
     const fetchJobs = async () => {
         setJobsLoading(true);
@@ -445,6 +500,56 @@ export default function AdminPage() {
         }
     };
 
+    const fetchPendingUsers = async () => {
+        try {
+            const response = await api.get("/admin/pending-users?status=pending");
+            setPendingUsers(response.data);
+        } catch (error) {
+            console.error("Failed to load pending users", error);
+        }
+    };
+
+    const handleApprovePendingUser = async (requestId: number) => {
+        if (!approvePassword) {
+            setUserMessage({ type: "error", text: "Please enter a password for the new user." });
+            return;
+        }
+        setApprovingUserId(requestId);
+        setUserMessage(null);
+        try {
+            await api.post(`/admin/pending-users/${requestId}/approve`, { password: approvePassword });
+            setShowApproveModal(false);
+            setApprovePassword("");
+            setSelectedPendingUser(null);
+            fetchPendingUsers();
+            fetchUsers();
+            setUserMessage({ type: "success", text: "User account created and enabled successfully." });
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { detail?: string } } };
+            setUserMessage({
+                type: "error",
+                text: err.response?.data?.detail ?? "Failed to approve user request.",
+            });
+        } finally {
+            setApprovingUserId(null);
+        }
+    };
+
+    const handleRejectPendingUser = async (requestId: number) => {
+        setUserMessage(null);
+        try {
+            await api.post(`/admin/pending-users/${requestId}/reject`);
+            fetchPendingUsers();
+            setUserMessage({ type: "success", text: "User request rejected." });
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { detail?: string } } };
+            setUserMessage({
+                type: "error",
+                text: err.response?.data?.detail ?? "Failed to reject user request.",
+            });
+        }
+    };
+
     const fetchFeedback = async () => {
         try {
             const response = await api.get("/auth/feedback/all");
@@ -488,6 +593,7 @@ export default function AdminPage() {
         fetchFeedback();
         fetchSchedules();
         fetchSymbols();
+        fetchPendingUsers();
         const interval = setInterval(() => {
             fetchJobs();
             fetchOhlcvStatus();
@@ -609,7 +715,6 @@ export default function AdminPage() {
                 country: createForm.country || undefined,
                 city: createForm.city || undefined,
                 postal_code: createForm.postal_code || undefined,
-                telegram_chat_id: createForm.telegram_chat_id || undefined,
             };
             await api.post("/auth/users", payload);
             setCreateMessage({ type: "success", text: "User created successfully." });
@@ -623,7 +728,6 @@ export default function AdminPage() {
                 country: "",
                 city: "",
                 postal_code: "",
-                telegram_chat_id: "",
             });
             fetchUsers();
         } catch (error: unknown) {
@@ -655,6 +759,78 @@ export default function AdminPage() {
         }
     };
 
+    const handleEditUser = (user: UserRecord) => {
+        setEditingUserId(user.id);
+        setEditForm({
+            userid: user.userid || "",
+            password: "",
+        });
+    };
+
+    const handleSaveUserEdit = async (userId: number) => {
+        setUserMessage(null);
+        try {
+            // Validate userid format (alphanumeric, underscore, hyphen only - no @)
+            if (editForm.userid && !/^[a-zA-Z0-9_-]+$/.test(editForm.userid)) {
+                setUserMessage({
+                    type: "error",
+                    text: "UserID must be alphanumeric (letters, numbers, underscore, or hyphen only). No @ symbol allowed.",
+                });
+                return;
+            }
+            
+            const payload: any = {};
+            if (editForm.userid) payload.userid = editForm.userid;
+            if (editForm.password) payload.password = editForm.password;
+            
+            await api.put(`/auth/users/${userId}`, payload);
+            setEditingUserId(null);
+            setEditForm({ userid: "", password: "" });
+            fetchUsers();
+            setUserMessage({ type: "success", text: "User updated successfully." });
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { detail?: string } } };
+            setUserMessage({
+                type: "error",
+                text: err.response?.data?.detail ?? "Failed to update user.",
+            });
+        }
+    };
+
+    const handleToggleUserActive = async (userId: number, currentStatus: boolean) => {
+        setTogglingUserId(userId);
+        setUserMessage(null);
+        try {
+            await api.put(`/auth/users/${userId}`, { is_active: !currentStatus });
+            fetchUsers();
+            setUserMessage({ type: "success", text: `User ${!currentStatus ? "enabled" : "disabled"} successfully.` });
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { detail?: string } } };
+            setUserMessage({
+                type: "error",
+                text: err.response?.data?.detail ?? "Failed to update user status.",
+            });
+        } finally {
+            setTogglingUserId(null);
+        }
+    };
+
+    const isUserActiveNow = (user: UserRecord): boolean => {
+        if (!user.last_activity) return false;
+        try {
+            const lastActivity = new Date(user.last_activity);
+            const now = new Date();
+            // Check if date is valid
+            if (isNaN(lastActivity.getTime())) return false;
+            const diffSeconds = (now.getTime() - lastActivity.getTime()) / 1000;
+            // Active if last activity within 2 minutes (120 seconds) and not in the future
+            return diffSeconds <= 120 && diffSeconds >= 0;
+        } catch (error) {
+            console.error("Error checking user activity:", error, user);
+            return false;
+        }
+    };
+
     const handleNotifyUser = async (user: UserRecord) => {
         const promptMessage = window.prompt(
             `Enter the message to send to ${user.email} via Telegram.`,
@@ -680,6 +856,10 @@ export default function AdminPage() {
         } finally {
             setNotifyingUserId(null);
         }
+    };
+
+    const handleColumnFilterChange = (column: string, value: string) => {
+        setColumnFilters(prev => ({ ...prev, [column]: value }));
     };
 
     if (accessLoading) {
@@ -1045,9 +1225,22 @@ export default function AdminPage() {
     // ─────────────────────────────────────────────────────────────────────────────
     // RENDER: Accounts Tab Content
     // ─────────────────────────────────────────────────────────────────────────────
-    const renderAccountsTab = () => (
+    const renderAccountsTab = () => {
+        // Filter users based on search query
+        const filteredUsers = users.filter((user) => {
+            if (!searchQuery) return true;
+            const query = searchQuery.toLowerCase();
+            return (
+                (user.full_name?.toLowerCase().includes(query)) ||
+                (user.email?.toLowerCase().includes(query)) ||
+                (user.userid?.toLowerCase().includes(query)) ||
+                (user.phone_number?.toLowerCase().includes(query))
+            );
+        });
+
+        return (
         <div className="space-y-6">
-            <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+            <section>
                 {/* Users Table */}
                 <div className="glass-panel rounded-xl border border-slate-800 p-4 space-y-3">
                     <div className="flex items-center justify-between">
@@ -1056,6 +1249,16 @@ export default function AdminPage() {
                             <h3 className="text-lg font-semibold">Accounts</h3>
                         </div>
                         <div className="flex items-center gap-2">
+                            <div className="relative">
+                                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                                <Input
+                                    type="text"
+                                    placeholder="Search by name, email, userid, phone..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="pl-8 bg-slate-900/50 border-slate-800 text-xs h-8 w-64"
+                                />
+                            </div>
                             <Button className="bg-sky-500 hover:bg-sky-400 text-xs flex items-center gap-2" onClick={() => setShowCreateDrawer(true)}>
                                 <Plus className="h-4 w-4" />
                                 Create User
@@ -1083,22 +1286,62 @@ export default function AdminPage() {
                             <thead className="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-500">
                                 <tr>
                                     <th className="px-4 py-3 text-left">User</th>
+                                    <th className="px-4 py-3 text-left">UserID</th>
+                                    <th className="px-4 py-3 text-left">Password</th>
                                     <th className="px-4 py-3 text-left">Role</th>
-                                    <th className="px-4 py-3 text-left">Phone</th>
-                                    <th className="px-4 py-3 text-left">State</th>
-                                    <th className="px-4 py-3 text-left">Change Requests</th>
+                                    <th className="px-4 py-3 text-left">Status</th>
+                                    <th className="px-4 py-3 text-left">Activity</th>
+                                    <th className="px-4 py-3 text-left">Full Details</th>
                                     <th className="px-4 py-3 text-left">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-900">
-                                {users.map((user) => {
+                                {filteredUsers.map((user) => {
                                     const pending = changeRequests.filter((req) => req.user?.email === user.email);
                                     const isSuperAdmin = user.email === SUPER_ADMIN_EMAIL;
+                                    // Recalculate activity status on each render for real-time updates
+                                    const isActive = isUserActiveNow(user);
+                                    const isEditing = editingUserId === user.id;
+                                    // Use activityUpdateTrigger to force re-calculation
+                                    void activityUpdateTrigger;
+                                    
                                     return (
                                         <tr key={user.id} className="hover:bg-slate-900/40">
                                             <td className="px-4 py-3">
                                                 <p className="font-semibold text-white">{user.full_name || "Unassigned"}</p>
                                                 <p className="text-xs text-slate-400">{user.email}</p>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {isEditing ? (
+                                                    <Input
+                                                        value={editForm.userid}
+                                                        onChange={(e) => {
+                                                            const value = e.target.value;
+                                                            // Only allow alphanumeric, underscore, hyphen (no @)
+                                                            if (/^[a-zA-Z0-9_-]*$/.test(value)) {
+                                                                setEditForm(prev => ({ ...prev, userid: value }));
+                                                            }
+                                                        }}
+                                                        className="bg-slate-900/60 border-slate-800 text-xs h-7 w-24"
+                                                        placeholder="UserID (alphanumeric)"
+                                                        title="Alphanumeric only (no @ symbol)"
+                                                    />
+                                                ) : (
+                                                    <span className="text-slate-300 text-xs font-mono">{user.userid || "—"}</span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {isEditing ? (
+                                                    <Input
+                                                        type="password"
+                                                        value={editForm.password}
+                                                        onChange={(e) => setEditForm(prev => ({ ...prev, password: e.target.value }))}
+                                                        className="bg-slate-900/60 border-slate-800 text-xs h-7 w-32"
+                                                        placeholder="New password"
+                                                    />
+                                                ) : (
+                                                    <span className="text-slate-400 text-xs font-mono">••••••••</span>
+                                                )}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <span
@@ -1112,29 +1355,110 @@ export default function AdminPage() {
                                                     {user.role}
                                                 </span>
                                             </td>
-                                            <td className="px-4 py-3 text-slate-300 text-xs">{user.phone_number || "—"}</td>
-                                            <td className="px-4 py-3 text-slate-300 text-xs">{user.state || user.country || "—"}</td>
-                                            <td className="px-4 py-3 text-slate-300 text-xs">{pending.length}</td>
+                                            <td className="px-4 py-3">
+                                                <button
+                                                    onClick={() => handleToggleUserActive(user.id, user.is_active)}
+                                                    disabled={togglingUserId === user.id}
+                                                    className={cn(
+                                                        "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2",
+                                                        user.is_active ? "bg-emerald-500" : "bg-slate-700",
+                                                        (isSuperAdmin || togglingUserId === user.id) && "opacity-50 cursor-not-allowed"
+                                                    )}
+                                                >
+                                                    {togglingUserId === user.id ? (
+                                                        <SimpleSpinner size={10} />
+                                                    ) : (
+                                                        <span
+                                                            className={cn(
+                                                                "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                                                                user.is_active ? "translate-x-6" : "translate-x-1"
+                                                            )}
+                                                        />
+                                                    )}
+                                                </button>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={cn(
+                                                        "w-2 h-2 rounded-full",
+                                                        isActive ? "bg-emerald-400 animate-pulse" : "bg-slate-600"
+                                                    )} />
+                                                    <span className={cn(
+                                                        "text-xs font-semibold",
+                                                        isActive ? "text-emerald-300" : "text-slate-400"
+                                                    )}>
+                                                        {isActive ? "Live" : "Not Live"}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-slate-300">
+                                                <Button
+                                                    variant="secondary"
+                                                    size="icon"
+                                                    className="bg-sky-500/20 hover:bg-sky-500/30 text-sky-300"
+                                                    onClick={() => {
+                                                        setSelectedUserDetails(user);
+                                                        setShowDetailsModal(true);
+                                                    }}
+                                                    title="View Full Details"
+                                                >
+                                                    <Eye className="h-4 w-4" />
+                                                </Button>
+                                            </td>
                                             <td className="px-4 py-3 text-xs text-slate-300">
                                                 <div className="flex items-center gap-2">
-                                                    <Button
-                                                        variant="secondary"
-                                                        size="icon"
-                                                        className="bg-slate-900 hover:bg-slate-800"
-                                                        onClick={() => handleNotifyUser(user)}
-                                                        disabled={notifyingUserId === user.id}
-                                                    >
-                                                        {notifyingUserId === user.id ? <SimpleSpinner size={16} /> : <Send className="h-4 w-4" />}
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="text-slate-400 hover:text-rose-400 hover:bg-rose-500/10"
-                                                        disabled={isSuperAdmin || deletingUserId === user.id}
-                                                        onClick={() => handleDeleteUser(user.id)}
-                                                    >
-                                                        {deletingUserId === user.id ? <SimpleSpinner size={16} /> : <Trash2 className="h-4 w-4" />}
-                                                    </Button>
+                                                    {isEditing ? (
+                                                        <>
+                                                            <Button
+                                                                variant="secondary"
+                                                                size="icon"
+                                                                className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300"
+                                                                onClick={() => handleSaveUserEdit(user.id)}
+                                                            >
+                                                                <X className="h-4 w-4 rotate-45" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="text-slate-400 hover:text-slate-200"
+                                                                onClick={() => {
+                                                                    setEditingUserId(null);
+                                                                    setEditForm({ userid: "", password: "" });
+                                                                }}
+                                                            >
+                                                                <X className="h-4 w-4" />
+                                                            </Button>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Button
+                                                                variant="secondary"
+                                                                size="icon"
+                                                                className="bg-slate-900 hover:bg-slate-800"
+                                                                onClick={() => handleEditUser(user)}
+                                                            >
+                                                                <Edit className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="secondary"
+                                                                size="icon"
+                                                                className="bg-slate-900 hover:bg-slate-800"
+                                                                onClick={() => handleNotifyUser(user)}
+                                                                disabled={notifyingUserId === user.id}
+                                                            >
+                                                                {notifyingUserId === user.id ? <SimpleSpinner size={16} /> : <Send className="h-4 w-4" />}
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="text-slate-400 hover:text-rose-400 hover:bg-rose-500/10"
+                                                                disabled={isSuperAdmin || deletingUserId === user.id}
+                                                                onClick={() => handleDeleteUser(user.id)}
+                                                            >
+                                                                {deletingUserId === user.id ? <SimpleSpinner size={16} /> : <Trash2 className="h-4 w-4" />}
+                                                            </Button>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
@@ -1144,50 +1468,320 @@ export default function AdminPage() {
                         </table>
                     </div>
                 </div>
-
-                {/* Change Requests */}
-                <div className="glass-panel rounded-xl border border-slate-800 p-4 space-y-3">
-                    <div className="flex items-center gap-2">
-                        <ClipboardList className="h-5 w-5 text-emerald-300" />
-                        <h3 className="text-lg font-semibold">Change Requests</h3>
-                    </div>
-                    <div className="space-y-3 max-h-[420px] overflow-auto pr-2">
-                        {changeRequests.slice(0, 8).map((request) => (
-                            <div key={request.id} className="rounded-xl border border-slate-800/70 bg-slate-950/60 p-4 space-y-1">
-                                <div className="flex items-center justify-between text-sm">
-                                    <span className="font-semibold text-slate-100">{request.user?.full_name || request.user?.email}</span>
-                                    <span className="text-xs text-slate-500">{new Date(request.created_at).toLocaleString()}</span>
-                                </div>
-                                <p className="text-xs uppercase tracking-wide text-slate-500">{request.request_type.replace("_", " ")}</p>
-                                <p className="text-sm text-slate-300">{request.details || "No additional details."}</p>
-                                <span
-                                    className={cn(
-                                        "inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full",
-                                        request.status === "completed"
-                                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-                                            : "bg-yellow-500/15 text-yellow-200 border border-yellow-500/30"
-                                    )}
-                                >
-                                    <Bell className="h-3 w-3" />
-                                    {request.status}
-                                </span>
-                            </div>
-                        ))}
-                        {changeRequests.length === 0 && (
-                            <p className="text-slate-500 text-sm">No change requests.</p>
-                        )}
-                    </div>
-                    <div className="rounded-xl border border-slate-800/60 bg-slate-900/60 p-4 text-xs text-slate-400 space-y-2">
-                        <p className="font-semibold text-slate-200 uppercase tracking-wide">Telegram reminders</p>
-                        <p>Manual notification buttons live in the account drawer. Auto alerts fire when users update their own details.</p>
-                    </div>
-                </div>
             </section>
         </div>
-    );
+        );
+    };
 
-    const handleColumnFilterChange = (column: string, value: string) => {
-        setColumnFilters(prev => ({ ...prev, [column]: value }));
+    // ─────────────────────────────────────────────────────────────────────────────
+    // RENDER: Users Query Tab Content
+    // ─────────────────────────────────────────────────────────────────────────────
+    const renderUsersQueryTab = () => {
+        const [queryFilters, setQueryFilters] = useState<Record<string, string>>({});
+        const [queryResults, setQueryResults] = useState<any[]>([]);
+        const [isLoadingQuery, setIsLoadingQuery] = useState(false);
+
+        const buildAllData = () => {
+            return [
+                ...users.map(u => ({ ...u, type: 'user', request_status: null })),
+                ...pendingUsers.map(p => ({
+                    id: p.id,
+                    userid: p.userid,
+                    email: p.email || '',
+                    full_name: p.full_name,
+                    phone_number: p.phone_number,
+                    age: p.age,
+                    address_line1: p.address_line1,
+                    address_line2: p.address_line2,
+                    city: p.city,
+                    state: p.state,
+                    postal_code: p.postal_code,
+                    country: p.country,
+                    role: 'pending',
+                    is_active: false,
+                    last_activity: null,
+                    created_at: p.created_at,
+                    type: 'pending_request',
+                    request_status: p.status,
+                    message: p.message
+                }))
+            ];
+        };
+
+        const handleQuery = () => {
+            setIsLoadingQuery(true);
+            const allData = buildAllData();
+            
+            let filtered = allData;
+            
+            if (queryFilters.name) {
+                filtered = filtered.filter(u => u.full_name?.toLowerCase().includes(queryFilters.name.toLowerCase()));
+            }
+            if (queryFilters.email) {
+                filtered = filtered.filter(u => u.email?.toLowerCase().includes(queryFilters.email.toLowerCase()));
+            }
+            if (queryFilters.userid) {
+                filtered = filtered.filter(u => u.userid?.toLowerCase().includes(queryFilters.userid.toLowerCase()));
+            }
+            if (queryFilters.phone) {
+                filtered = filtered.filter(u => u.phone_number?.toLowerCase().includes(queryFilters.phone.toLowerCase()));
+            }
+            if (queryFilters.role) {
+                if (queryFilters.role === 'pending') {
+                    filtered = filtered.filter(u => u.type === 'pending_request');
+                } else {
+                    filtered = filtered.filter(u => u.role === queryFilters.role && u.type === 'user');
+                }
+            }
+            if (queryFilters.status) {
+                if (queryFilters.status === 'pending') {
+                    filtered = filtered.filter(u => u.type === 'pending_request' && u.request_status === 'pending');
+                } else {
+                    filtered = filtered.filter(u => 
+                        u.type === 'user' && (queryFilters.status === "active" ? u.is_active : !u.is_active)
+                    );
+                }
+            }
+            
+            setQueryResults(filtered);
+            setIsLoadingQuery(false);
+        };
+
+        // Load pending users when tab is active and auto-query
+        useEffect(() => {
+            if (activeTab === "users_query") {
+                fetchPendingUsers();
+                fetchUsers();
+            }
+        }, [activeTab]);
+
+        // Auto-query when data is loaded
+        useEffect(() => {
+            if (activeTab === "users_query" && (users.length > 0 || pendingUsers.length > 0)) {
+                const allData = buildAllData();
+                setQueryResults(allData);
+            }
+        }, [users, pendingUsers, activeTab]);
+
+        return (
+            <div className="space-y-6">
+                <div className="glass-panel rounded-xl border border-slate-800 p-6 space-y-4">
+                    <div className="flex items-center gap-2 mb-4">
+                        <Search className="h-5 w-5 text-sky-400" />
+                        <h3 className="text-lg font-semibold">Query Users & Pending Requests</h3>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div>
+                            <label className="text-xs uppercase text-slate-500 mb-1 block">Name</label>
+                            <Input
+                                value={queryFilters.name || ""}
+                                onChange={(e) => setQueryFilters(prev => ({ ...prev, name: e.target.value }))}
+                                className="bg-slate-900/50 border-slate-800 text-xs"
+                                placeholder="Filter by name"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs uppercase text-slate-500 mb-1 block">Email</label>
+                            <Input
+                                value={queryFilters.email || ""}
+                                onChange={(e) => setQueryFilters(prev => ({ ...prev, email: e.target.value }))}
+                                className="bg-slate-900/50 border-slate-800 text-xs"
+                                placeholder="Filter by email"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs uppercase text-slate-500 mb-1 block">UserID</label>
+                            <Input
+                                value={queryFilters.userid || ""}
+                                onChange={(e) => setQueryFilters(prev => ({ ...prev, userid: e.target.value }))}
+                                className="bg-slate-900/50 border-slate-800 text-xs"
+                                placeholder="Filter by UserID"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs uppercase text-slate-500 mb-1 block">Phone</label>
+                            <Input
+                                value={queryFilters.phone || ""}
+                                onChange={(e) => setQueryFilters(prev => ({ ...prev, phone: e.target.value }))}
+                                className="bg-slate-900/50 border-slate-800 text-xs"
+                                placeholder="Filter by phone"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs uppercase text-slate-500 mb-1 block">Role</label>
+                            <select
+                                value={queryFilters.role || ""}
+                                onChange={(e) => setQueryFilters(prev => ({ ...prev, role: e.target.value }))}
+                                className="w-full rounded-md bg-slate-900/50 border border-slate-800 px-3 py-2 text-xs"
+                            >
+                                <option value="">All Roles</option>
+                                <option value="user">User</option>
+                                <option value="admin">Admin</option>
+                                <option value="superadmin">Super Admin</option>
+                                <option value="pending">Pending Requests</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-xs uppercase text-slate-500 mb-1 block">Status</label>
+                            <select
+                                value={queryFilters.status || ""}
+                                onChange={(e) => setQueryFilters(prev => ({ ...prev, status: e.target.value }))}
+                                className="w-full rounded-md bg-slate-900/50 border border-slate-800 px-3 py-2 text-xs"
+                            >
+                                <option value="">All Status</option>
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                                <option value="pending">Pending</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div className="flex gap-2">
+                        <Button onClick={handleQuery} className="bg-sky-500 hover:bg-sky-400" disabled={isLoadingQuery}>
+                            {isLoadingQuery ? (
+                                <>
+                                    <SimpleSpinner size={16} className="mr-2" />
+                                    Querying...
+                                </>
+                            ) : (
+                                <>
+                                    <Search className="h-4 w-4 mr-2" />
+                                    Query
+                                </>
+                            )}
+                        </Button>
+                        <Button 
+                            variant="secondary" 
+                            onClick={() => {
+                                setQueryFilters({});
+                                const allData = buildAllData();
+                                setQueryResults(allData);
+                            }}
+                        >
+                            Show All
+                        </Button>
+                    </div>
+                </div>
+
+                {queryResults.length > 0 ? (
+                    <div className="glass-panel rounded-xl border border-slate-800 p-4">
+                        <h4 className="text-sm font-semibold mb-4">Query Results ({queryResults.length})</h4>
+                        <div className="overflow-auto">
+                            <table className="min-w-full text-sm divide-y divide-slate-800">
+                                <thead className="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-500">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left">Type</th>
+                                        <th className="px-4 py-3 text-left">Name</th>
+                                        <th className="px-4 py-3 text-left">Email</th>
+                                        <th className="px-4 py-3 text-left">UserID</th>
+                                        <th className="px-4 py-3 text-left">Phone</th>
+                                        <th className="px-4 py-3 text-left">Age</th>
+                                        <th className="px-4 py-3 text-left">Role/Status</th>
+                                        <th className="px-4 py-3 text-left">Account Status</th>
+                                        <th className="px-4 py-3 text-left">Activity</th>
+                                        <th className="px-4 py-3 text-left">Last Activity</th>
+                                        <th className="px-4 py-3 text-left">Requested At</th>
+                                        <th className="px-4 py-3 text-left">Message</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-900">
+                                    {queryResults.map((item) => {
+                                        // Recalculate activity status on each render for real-time updates
+                                        const isActive = item.type === 'user' ? isUserActiveNow(item) : false;
+                                        const isPendingRequest = item.type === 'pending_request';
+                                        // Use activityUpdateTrigger to force re-calculation
+                                        void activityUpdateTrigger;
+                                        return (
+                                            <tr key={`${item.type}-${item.id}`} className="hover:bg-slate-900/40">
+                                                <td className="px-4 py-3">
+                                                    <span className={cn(
+                                                        "px-2 py-0.5 rounded-full text-xs font-semibold",
+                                                        isPendingRequest 
+                                                            ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                                                            : "bg-sky-500/15 text-sky-300 border border-sky-500/30"
+                                                    )}>
+                                                        {isPendingRequest ? "Pending" : "User"}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3">{item.full_name || "—"}</td>
+                                                <td className="px-4 py-3 text-xs">{item.email || "—"}</td>
+                                                <td className="px-4 py-3 text-xs font-mono">{item.userid || "—"}</td>
+                                                <td className="px-4 py-3 text-xs">{item.phone_number || "—"}</td>
+                                                <td className="px-4 py-3 text-xs">{item.age || "—"}</td>
+                                                <td className="px-4 py-3">
+                                                    {isPendingRequest ? (
+                                                        <span className={cn(
+                                                            "px-2 py-0.5 rounded-full text-xs",
+                                                            item.request_status === 'pending' 
+                                                                ? "bg-amber-500/15 text-amber-300" 
+                                                                : item.request_status === 'approved'
+                                                                ? "bg-emerald-500/15 text-emerald-300"
+                                                                : "bg-rose-500/15 text-rose-300"
+                                                        )}>
+                                                            {item.request_status || 'pending'}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-200">
+                                                            {item.role}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {isPendingRequest ? (
+                                                        <span className="px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-400">
+                                                            Not Created
+                                                        </span>
+                                                    ) : (
+                                                        <span className={cn(
+                                                            "px-2 py-0.5 rounded-full text-xs",
+                                                            item.is_active ? "bg-emerald-500/15 text-emerald-300" : "bg-slate-800 text-slate-400"
+                                                        )}>
+                                                            {item.is_active ? "Enabled" : "Disabled"}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {isPendingRequest ? (
+                                                        <span className="text-xs text-slate-500">N/A</span>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2">
+                                                            <div className={cn(
+                                                                "w-2 h-2 rounded-full animate-pulse",
+                                                                isActive ? "bg-emerald-400" : "bg-slate-600"
+                                                            )} />
+                                                            <span className={cn(
+                                                                "text-xs font-semibold",
+                                                                isActive ? "text-emerald-300" : "text-slate-400"
+                                                            )}>
+                                                                {isActive ? "Live" : "Not Live"}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-xs text-slate-400">
+                                                    {item.last_activity ? new Date(item.last_activity).toLocaleString() : "Never"}
+                                                </td>
+                                                <td className="px-4 py-3 text-xs text-slate-400">
+                                                    {item.created_at ? new Date(item.created_at).toLocaleString() : "—"}
+                                                </td>
+                                                <td className="px-4 py-3 text-xs text-slate-400 max-w-xs truncate">
+                                                    {item.message || "—"}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="glass-panel rounded-xl border border-slate-800 p-8 text-center">
+                        <p className="text-slate-400 text-sm">No results found. Try adjusting your filters or click "Show All" to see all users and pending requests.</p>
+                    </div>
+                )}
+            </div>
+        );
     };
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -1849,15 +2443,6 @@ export default function AdminPage() {
                                     />
                                 </div>
                             </div>
-                            <div>
-                                <label className="text-xs uppercase text-slate-500">Telegram Chat ID</label>
-                                <Input
-                                    value={createForm.telegram_chat_id}
-                                    onChange={(e) => setCreateForm((prev) => ({ ...prev, telegram_chat_id: e.target.value }))}
-                                    className="bg-slate-900/50 border-slate-800 mt-1"
-                                    placeholder="@rubik_user or numeric ID"
-                                />
-                            </div>
                             <Button type="submit" className="w-full bg-sky-500 hover:bg-sky-400 flex items-center justify-center gap-2" disabled={creatingUser}>
                                 {creatingUser ? <SimpleSpinner size={16} /> : <Send className="h-4 w-4" />}
                                 Create User
@@ -2256,6 +2841,195 @@ export default function AdminPage() {
                                     {editingSchedule ? "Update" : "Create"} Schedule
                                 </Button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Approve Pending User Modal */}
+            {showApproveModal && selectedPendingUser && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="glass-panel w-full max-w-md rounded-2xl border border-slate-700/50 p-6 space-y-4 bg-slate-950">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <User className="h-6 w-6 text-emerald-400" />
+                                <h2 className="text-xl font-bold text-white">Approve User Request</h2>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setShowApproveModal(false);
+                                    setSelectedPendingUser(null);
+                                    setApprovePassword("");
+                                }}
+                                className="text-slate-400 hover:text-white transition-colors"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">UserID</p>
+                                <p className="text-sm font-mono text-emerald-300">{selectedPendingUser.userid}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Name</p>
+                                <p className="text-sm text-white">{selectedPendingUser.full_name || "—"}</p>
+                            </div>
+                            {selectedPendingUser.email && (
+                                <div>
+                                    <p className="text-xs uppercase text-slate-500 mb-1">Email</p>
+                                    <p className="text-sm text-white">{selectedPendingUser.email}</p>
+                                </div>
+                            )}
+                            <div>
+                                <label className="text-xs uppercase text-slate-500 mb-1 block">Set Password</label>
+                                <Input
+                                    type="password"
+                                    value={approvePassword}
+                                    onChange={(e) => setApprovePassword(e.target.value)}
+                                    className="bg-slate-900/50 border-slate-700 text-white"
+                                    placeholder="Enter password for new user"
+                                    required
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 pt-2">
+                            <Button
+                                variant="secondary"
+                                onClick={() => {
+                                    setShowApproveModal(false);
+                                    setSelectedPendingUser(null);
+                                    setApprovePassword("");
+                                }}
+                                className="flex-1 bg-slate-800 hover:bg-slate-700"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={() => handleApprovePendingUser(selectedPendingUser.id)}
+                                disabled={!approvePassword || approvingUserId === selectedPendingUser.id}
+                                className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-white"
+                            >
+                                {approvingUserId === selectedPendingUser.id ? (
+                                    <SimpleSpinner size={16} />
+                                ) : (
+                                    "Approve & Create Account"
+                                )}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* User Details Modal */}
+            {showDetailsModal && selectedUserDetails && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="glass-panel w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700/50 p-6 space-y-4 bg-slate-950">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <Eye className="h-6 w-6 text-sky-400" />
+                                <h2 className="text-xl font-bold text-white">User Full Details</h2>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setShowDetailsModal(false);
+                                    setSelectedUserDetails(null);
+                                }}
+                                className="text-slate-400 hover:text-white transition-colors"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Full Name</p>
+                                <p className="text-white">{selectedUserDetails.full_name || "—"}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Email</p>
+                                <p className="text-white">{selectedUserDetails.email}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">UserID</p>
+                                <p className="text-sky-300 font-mono">{selectedUserDetails.userid || "—"}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Role</p>
+                                <p className="text-white">{selectedUserDetails.role}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Phone Number</p>
+                                <p className="text-white">{selectedUserDetails.phone_number || "—"}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">State</p>
+                                <p className="text-white">{selectedUserDetails.state || "—"}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Country</p>
+                                <p className="text-white">{selectedUserDetails.country || "—"}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Account Status</p>
+                                <p className={cn(
+                                    "font-semibold",
+                                    selectedUserDetails.is_active ? "text-emerald-300" : "text-slate-400"
+                                )}>
+                                    {selectedUserDetails.is_active ? "Enabled" : "Disabled"}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Last Activity</p>
+                                <p className="text-white">
+                                    {selectedUserDetails.last_activity 
+                                        ? new Date(selectedUserDetails.last_activity).toLocaleString()
+                                        : "Never"}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">City</p>
+                                <p className="text-white">{selectedUserDetails.city || "—"}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Postal Code</p>
+                                <p className="text-white">{selectedUserDetails.postal_code || "—"}</p>
+                            </div>
+                            <div className="col-span-2">
+                                <p className="text-xs uppercase text-slate-500 mb-1">Address Line 1</p>
+                                <p className="text-white">{selectedUserDetails.address_line1 || "—"}</p>
+                            </div>
+                            <div className="col-span-2">
+                                <p className="text-xs uppercase text-slate-500 mb-1">Address Line 2</p>
+                                <p className="text-white">{selectedUserDetails.address_line2 || "—"}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Age</p>
+                                <p className="text-white">{selectedUserDetails.age || "—"}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase text-slate-500 mb-1">Created At</p>
+                                <p className="text-white">
+                                    {selectedUserDetails.created_at 
+                                        ? new Date(selectedUserDetails.created_at).toLocaleString()
+                                        : "—"}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="pt-4 border-t border-slate-800">
+                            <Button
+                                variant="secondary"
+                                className="w-full"
+                                onClick={() => {
+                                    setShowDetailsModal(false);
+                                    setSelectedUserDetails(null);
+                                }}
+                            >
+                                Close
+                            </Button>
                         </div>
                     </div>
                 </div>

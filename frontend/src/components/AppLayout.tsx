@@ -1,10 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
 import SimpleSpinner from "@/components/SimpleSpinner";
 import { useInactivityTimer } from "@/hooks/useInactivityTimer";
+import api from "@/lib/api";
+import { isAuthenticated } from "@/lib/auth";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -26,6 +29,27 @@ export function AppLayout({ children }: AppLayoutProps) {
     // This will handle session expiry and inactivity logout
     // The hook will check internally if user is authenticated
     useInactivityTimer();
+
+    // Heartbeat to update last_activity on backend
+    useEffect(() => {
+        if (isLoginPage || !isAuthenticated()) return;
+
+        // Update activity immediately
+        const updateActivity = async () => {
+            try {
+                await api.get("/auth/users/me");
+            } catch (error) {
+                // Silently fail - user might not be authenticated
+            }
+        };
+
+        updateActivity();
+
+        // Update activity every 30 seconds
+        const interval = setInterval(updateActivity, 30000);
+
+        return () => clearInterval(interval);
+    }, [isLoginPage]);
 
     if (isLoginPage) {
         return <>{children}</>;
