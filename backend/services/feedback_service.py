@@ -2,7 +2,10 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from core import models, user_utils
+from core import user_utils
+
+from models.pending_user_request import PendingUserRequest
+from models.user_feedback import UserFeedback
 
 
 class FeedbackService:
@@ -12,7 +15,7 @@ class FeedbackService:
     def create_pending_request(db: Session, data):
         userid = user_utils.generate_unique_userid(db, data.full_name, data.phone_number)
 
-        req = models.PendingUserRequest(
+        req = PendingUserRequest(
             userid=userid,
             full_name=data.full_name,
             email=data.email,
@@ -37,7 +40,7 @@ class FeedbackService:
     # ---------- Feedback ----------
     @staticmethod
     def create_feedback(db: Session, user, payload):
-        feedback = models.UserFeedback(
+        feedback = UserFeedback(
             user_id=user.id,
             feedback_type=payload.feedback_type,
             title=payload.title,
@@ -52,9 +55,9 @@ class FeedbackService:
     @staticmethod
     def list_my_feedback(db: Session, user):
         return (
-            db.query(models.UserFeedback)
-            .filter(models.UserFeedback.user_id == user.id)
-            .order_by(models.UserFeedback.created_at.desc())
+            db.query(UserFeedback)
+            .filter(UserFeedback.user_id == user.id)
+            .order_by(UserFeedback.created_at.desc())
             .limit(50)
             .all()
         )
@@ -62,15 +65,15 @@ class FeedbackService:
     @staticmethod
     def list_all_feedback(db: Session):
         return (
-            db.query(models.UserFeedback)
-            .order_by(models.UserFeedback.created_at.desc())
+            db.query(UserFeedback)
+            .order_by(UserFeedback.created_at.desc())
             .limit(100)
             .all()
         )
 
     @staticmethod
     def update_feedback(db: Session, feedback_id: int, payload):
-        fb = db.query(models.UserFeedback).filter(models.UserFeedback.id == feedback_id).first()
+        fb = db.query(UserFeedback).filter(UserFeedback.id == feedback_id).first()
         if not fb:
             raise HTTPException(status_code=404, detail="Feedback not found")
 
@@ -85,7 +88,7 @@ class FeedbackService:
 
     @staticmethod
     def delete_feedback(db: Session, feedback_id: int):
-        fb = db.query(models.UserFeedback).filter(models.UserFeedback.id == feedback_id).first()
+        fb = db.query(UserFeedback).filter(UserFeedback.id == feedback_id).first()
         if not fb:
             raise HTTPException(status_code=404, detail="Feedback not found")
 

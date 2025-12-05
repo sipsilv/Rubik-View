@@ -3,26 +3,31 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from core import models, otp, notifications
-from core.config import settings
+from core import otp
+from notifications.manager import notification_manager
+
+from models.otp_token import OTPToken
+from models.user import User
+
+from config import config as settings
 
 
 class OTPService:
 
     @staticmethod
-    def request_otp(db: Session, user: models.User, payload):
+    async def request_otp(db: Session, user: User, payload):
         purpose = payload.purpose
 
         # Enforce resend window
         window = datetime.utcnow() - timedelta(seconds=settings.OTP_RESEND_SECONDS)
         recent = (
-            db.query(models.OTPToken)
+            db.query(OTPToken)
             .filter(
-                models.OTPToken.user_id == user.id,
-                models.OTPToken.purpose == purpose,
-                models.OTPToken.created_at >= window,
+                OTPToken.user_id == user.id,
+                OTPToken.purpose == purpose,
+                OTPToken.created_at >= window,
             )
-            .order_by(models.OTPToken.created_at.desc())
+            .order_by(OTPToken.created_at.desc())
             .first()
         )
 
@@ -32,7 +37,7 @@ class OTPService:
         # Generate OTP
         otp_obj, code = otp.create_otp(db, user, purpose)
 
-        delivered = notifications.send_telegram_message(
+        delivered = await notification_manager.send_telegram_message(
             user.telegram_chat_id,
             f"Your OTP for {purpose.replace('_', ' ').title()} is {code}. "
             f"Expires at {otp_obj.expires_at} UTC"

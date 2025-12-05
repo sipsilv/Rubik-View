@@ -3,14 +3,15 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from core import models, security, otp, change_requests, notifications
-from core.config import settings
+from core import security, otp, change_requests
+from notifications.manager import notification_manager
+from models.user import User
 
 
 class ProfileService:
 
     @staticmethod
-    def update_profile(db: Session, user: models.User, payload):
+    def update_profile(db: Session, user: User, payload):
         # OTP validation
         if not otp.verify_otp(db, user, "PROFILE_UPDATE", payload.otp_code):
             raise HTTPException(status_code=400, detail="Invalid or expired OTP")
@@ -35,7 +36,7 @@ class ProfileService:
         )
 
         # Telegram notify
-        notifications.send_telegram_message(
+        notification_manager.send_telegram_message(
             user.telegram_chat_id,
             f"Profile updated at {datetime.utcnow().isoformat()}",
         )
@@ -43,7 +44,7 @@ class ProfileService:
         return user
 
     @staticmethod
-    def update_password(db: Session, user: models.User, payload):
+    def update_password(db: Session, user: User, payload):
         if not otp.verify_otp(db, user, "PASSWORD_CHANGE", payload.otp_code):
             raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
@@ -59,7 +60,7 @@ class ProfileService:
             details="Password updated",
         )
 
-        notifications.send_telegram_message(
+        notification_manager.send_telegram_message(
             user.telegram_chat_id,
             f"Password updated at {datetime.utcnow().isoformat()}",
         )

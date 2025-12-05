@@ -3,21 +3,22 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from . import models
+from models.user import User
+from models.change_request import ChangeRequest
 
 
 def create_change_request(
     db: Session,
-    user: models.User,
+    user: User,
     request_type: str,
     status: str = "completed",
     details: Optional[str] = None,
-) -> models.ChangeRequest:
+) -> ChangeRequest:
     """
     Persist a change request audit entry for the given user.
     """
     resolved_at = datetime.utcnow() if status == "completed" else None
-    entry = models.ChangeRequest(
+    entry = ChangeRequest(
         user_id=user.id,
         request_type=request_type,
         status=status,

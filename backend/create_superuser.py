@@ -2,7 +2,8 @@
 Script to create a superuser account for Rubik View
 """
 from sqlalchemy.orm import Session
-from core import database, models, security
+from core import database, models
+from security.hashing import get_password_hash
 
 def create_superuser(email: str, password: str, full_name: str = "Admin"):
     """Create a superuser account"""
@@ -20,7 +21,7 @@ def create_superuser(email: str, password: str, full_name: str = "Admin"):
             return False
         
         # Hash the password
-        hashed_password = security.get_password_hash(password)
+        hashed_password = get_password_hash(password)
         
         # Create new user
         new_user = models.User(

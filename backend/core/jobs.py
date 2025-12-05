@@ -10,9 +10,9 @@ from datetime import datetime
 from typing import Dict
 
 from sqlalchemy.orm import Session
-
-from . import models, database, log_db
-from .config import settings
+from . import log_db
+from models.admin_job import AdminJob
+from config.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +29,14 @@ PROCESS_MAP: Dict[int, subprocess.Popen] = {}
 
 def _job_is_running(db: Session, job_type: str) -> bool:
     return (
-        db.query(models.AdminJob)
-        .filter(models.AdminJob.job_type == job_type, models.AdminJob.status == "running")
+        db.query(AdminJob)
+        .filter(AdminJob.job_type == job_type, AdminJob.status == "running")
         .first()
         is not None
     )
 
 
-def start_job(db: Session, job_type: str, triggered_by: str = "manual") -> models.AdminJob:
+def start_job(db: Session, job_type: str, triggered_by: str = "manual") -> AdminJob:
     script_path = SCRIPT_MAP.get(job_type)
     if not script_path:
         raise ValueError(f"Unknown job type: {job_type}")
@@ -45,7 +45,7 @@ def start_job(db: Session, job_type: str, triggered_by: str = "manual") -> model
     if _job_is_running(db, job_type):
         raise RuntimeError(f"{job_type} job is already running.")
 
-    job = models.AdminJob(
+    job = AdminJob(
         job_type=job_type,
         status="running",
         triggered_by=triggered_by,
@@ -85,7 +85,7 @@ def _execute_job(job_id: int, script_path: str, job_type: str) -> None:
         PROCESS_MAP[job_id] = process
 
         # Persist PID
-        job = session.get(models.AdminJob, job_id)
+        job = session.get(AdminJob, job_id)
         if job and job.status == "running":
             try:
                 details = json.loads(job.details) if job.details else {}
@@ -108,7 +108,7 @@ def _execute_job(job_id: int, script_path: str, job_type: str) -> None:
 
         # Process finished, remove handle if still present
         PROCESS_MAP.pop(job_id, None)
-        job = session.get(models.AdminJob, job_id)
+        job = session.get(AdminJob, job_id)
         if job:
             # Refresh job to get latest status from database (might have been stopped while running)
             session.refresh(job)
@@ -149,7 +149,7 @@ def _execute_job(job_id: int, script_path: str, job_type: str) -> None:
                 session.commit()
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception("Job %s failed to execute: %s", job_type, exc)
-        job = session.get(models.AdminJob, job_id)
+        job = session.get(AdminJob, job_id)
         if job:
             # Refresh to get latest status (might have been stopped)
             session.refresh(job)
@@ -192,11 +192,11 @@ def _auto_trigger_signal_job() -> None:
         session.close()
 
 
-def stop_job(db: Session, job_id: int) -> models.AdminJob:
+def stop_job(db: Session, job_id: int) -> AdminJob:
     """
     Attempt to stop a running background job by terminating its subprocess.
     """
-    job = db.query(models.AdminJob).filter(models.AdminJob.id == job_id).first()
+    job = db.query(AdminJob).filter(AdminJob.id == job_id).first()
     if not job:
         raise ValueError("Job not found")
     if job.status != "running":
@@ -264,13 +264,13 @@ def stop_job(db: Session, job_id: int) -> models.AdminJob:
     return job
 
 
-def force_mark_stopped(db: Session, job_id: int) -> models.AdminJob:
+def force_mark_stopped(db: Session, job_id: int) -> AdminJob:
     """
     Force-mark a job as stopped in the database, without requiring a live
     subprocess handle. This is useful for cleaning up "stuck" jobs where the
     underlying OS process has already exited or could not be tracked.
     """
-    job = db.query(models.AdminJob).filter(models.AdminJob.id == job_id).first()
+    job = db.query(AdminJob).filter(AdminJob.id == job_id).first()
     if not job:
         raise ValueError("Job not found")
 

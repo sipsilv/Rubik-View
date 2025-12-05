@@ -4,11 +4,12 @@ Run this once after updating the User model
 """
 import sqlite3
 from pathlib import Path
-from core import database, models, user_utils, config
+from backend.core import config_old
+from core import database, models, user_utils
 
 def migrate_userids():
     """Add userid column and populate it for all existing users"""
-    db_path = Path(config.settings.BASE_DIR) / "Data" / "rubikview_users.db"
+    db_path = Path(config_old.settings.BASE_DIR) / "Data" / "rubikview_users.db"
     
     # Step 1: Add columns to database if they don't exist
     print("Step 1: Adding columns to database...")

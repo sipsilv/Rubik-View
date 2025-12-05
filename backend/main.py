@@ -5,10 +5,14 @@ from urllib.parse import urlparse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from core import database, models, security
+from db import session as database
+import models
+from models.user import User as UserModel
+
 # scheduler as scheduler_module  # Temporarily disabled
-from core.config import settings
-from api import auth, stocks, analysis, admin
+from config.config import settings
+from api.v1 import stocks_routes, analysis_routes, admin_routes, auth_routes
+from security.hashing import get_password_hash, verify_password
 
 
 def _get_sqlite_path() -> str | None:
@@ -99,12 +103,12 @@ def ensure_superadmin() -> None:
     """Create the configured super admin user if it does not exist, and update password if needed."""
     db = database.SessionLocal()
     try:
-        user = db.query(models.User).filter(models.User.email == settings.SUPERADMIN_EMAIL).first()
+        user = db.query(UserModel).filter(UserModel.email == settings.SUPERADMIN_EMAIL).first()
         if not user:
             # Use the proper password hashing function
-            hashed = security.get_password_hash(settings.SUPERADMIN_PASSWORD)
+            hashed = get_password_hash(settings.SUPERADMIN_PASSWORD)
 
-            user = models.User(
+            user = UserModel(
                 email=settings.SUPERADMIN_EMAIL,
                 hashed_password=hashed,
                 full_name=settings.SUPERADMIN_FULL_NAME,
@@ -116,9 +120,9 @@ def ensure_superadmin() -> None:
         else:
             # Update password hash if it was created with old method
             # Test if current password verifies correctly
-            if not security.verify_password(settings.SUPERADMIN_PASSWORD, user.hashed_password):
+            if not verify_password(settings.SUPERADMIN_PASSWORD, user.hashed_password):
                 # Password doesn't verify, rehash it
-                user.hashed_password = security.get_password_hash(settings.SUPERADMIN_PASSWORD)
+                user.hashed_password = get_password_hash(settings.SUPERADMIN_PASSWORD)
                 db.commit()
     finally:
         db.close()
@@ -153,10 +157,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
-app.include_router(stocks.router, prefix="/api/v1/stocks", tags=["stocks"])
-app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["analysis"])
-app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
+app.include_router(auth_routes.router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(stocks_routes.router, prefix="/api/v1", tags=["stocks"])
+app.include_router(analysis_routes.router, prefix="/api/v1/analysis", tags=["analysis"])
+app.include_router(admin_routes.router, prefix="/api/v1", tags=["admin"])
 
 
 @app.get("/")

@@ -8,12 +8,13 @@ Run this once to migrate from old structure to new structure
 """
 import sqlite3
 from pathlib import Path
-from core import database, models, user_utils, config, security
+from backend.core import config_old
+from core import database, models, user_utils, security
 from datetime import datetime
 
 def migrate_to_three_tables():
     """Migrate database to three-table structure"""
-    db_path = Path(config.settings.BASE_DIR) / "Data" / "rubikview_users.db"
+    db_path = Path(config_old.settings.BASE_DIR) / "Data" / "rubikview_users.db"
     
     print("=== Database Restructuring Migration ===\n")
     

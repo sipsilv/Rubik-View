@@ -2,13 +2,14 @@
 from datetime import datetime, timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from jose import JWTError, jwt
 
-from core import (
-    security,
-    models,
-    schemas
-)
-from core.config import settings
+from config import config as settings
+from models.user import User
+from security.hashing import get_password_hash, verify_password
+from security.jwt_utils import create_access_token
+from schemas import user_schemas
+
 
 
 class AuthService:
@@ -19,10 +20,10 @@ class AuthService:
     @staticmethod
     def get_user_from_token(token: str, db: Session):
         try:
-            payload = security.jwt.decode(
+            payload = jwt.decode(
                 token,
-                security.settings.SECRET_KEY,
-                algorithms=[security.settings.ALGORITHM]
+                settings.SECRET_KEY,
+                algorithms=[settings.ALGORITHM]
             )
             email: str = payload.get("sub")
             if email is None:
@@ -31,14 +32,14 @@ class AuthService:
                     detail="Could not validate credentials",
                     headers={"WWW-Authenticate": "Bearer"}
                 )
-        except security.JWTError:
+        except JWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        user = db.query(models.User).filter(models.User.email == email).first()
+        user = db.query(User).filter(User.email == email).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -56,14 +57,14 @@ class AuthService:
     # SIGNUP
     # -----------------------
     @staticmethod
-    def signup(user_data: schemas.UserCreate, db: Session):
-        existing = db.query(models.User).filter(models.User.email == user_data.email).first()
+    def signup(user_data: user_schemas.UserCreate, db: Session):
+        existing = db.query(User).filter(User.email == user_data.email).first()
         if existing:
             raise HTTPException(status_code=400, detail="Email already registered")
 
-        hashed = security.get_password_hash(user_data.password)
+        hashed = get_password_hash(user_data.password)
 
-        user = models.User(
+        user = User(
             email=user_data.email,
             hashed_password=hashed,
             full_name=user_data.full_name,
@@ -83,11 +84,11 @@ class AuthService:
 
         # Find by email, userid, or phone number
         user = (
-            db.query(models.User)
+            db.query(User)
             .filter(
-                (models.User.email == username) |
-                (models.User.userid == username) |
-                (models.User.phone_number == username)
+                (User.email == username) |
+                (User.userid == username) |
+                (User.phone_number == username)
             )
             .first()
         )
@@ -106,7 +107,7 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        if not security.verify_password(form_data.password, user.hashed_password):
+        if not verify_password(form_data.password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect username or password",
@@ -118,7 +119,7 @@ class AuthService:
         db.commit()
 
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        token = security.create_access_token(
+        token = create_access_token(
             data={"sub": user.email},
             expires_delta=access_token_expires
         )
@@ -128,7 +129,7 @@ class AuthService:
     # LOGOUT
     # -----------------------
     @staticmethod
-    def logout(current_user: models.User, db: Session):
+    def logout(current_user: User, db: Session):
         current_user.last_activity = datetime.utcnow() - timedelta(hours=1)
         db.commit()
         return {"message": "Logged out successfully"}
@@ -137,7 +138,7 @@ class AuthService:
     # ADMIN CHECK
     # -----------------------
     @staticmethod
-    def require_admin(current_user: models.User):
+    def require_admin(current_user: User):
         if current_user.role not in {"admin", settings.SUPERADMIN_ROLE}:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -150,7 +151,7 @@ class AuthService:
     # -----------------------
     @staticmethod
     def get_user_by_id(db: Session, user_id: int):
-        user = db.query(models.User).filter(models.User.id == user_id).first()
+        user = db.query(User).filter(User.id == user_id).first()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         return user

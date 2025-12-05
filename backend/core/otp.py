@@ -5,8 +5,9 @@ from typing import Tuple
 
 from sqlalchemy.orm import Session
 
-from . import models
-from .config import settings
+from models.user import User as UserModel
+from models.otp_token import OTPToken as OTPTokenModel
+from config  import config as settings
 
 
 def _hash_code(code: str) -> str:
@@ -18,7 +19,7 @@ def _generate_code() -> str:
     return "".join(secrets.choice("0123456789") for _ in range(length))
 
 
-def create_otp(db: Session, user: models.User, purpose: str) -> Tuple[models.OTPToken, str]:
+def create_otp(db: Session, user: UserModel, purpose: str) -> Tuple[OTPTokenModel, str]:
     """
     Create a fresh OTP for a user and return both the model and the raw code.
     """
@@ -26,7 +27,7 @@ def create_otp(db: Session, user: models.User, purpose: str) -> Tuple[models.OTP
     code_hash = _hash_code(code)
     expires_at = datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
 
-    otp = models.OTPToken(
+    otp = OTPTokenModel(
         user_id=user.id,
         purpose=purpose,
         code_hash=code_hash,
@@ -39,7 +40,7 @@ def create_otp(db: Session, user: models.User, purpose: str) -> Tuple[models.OTP
     return otp, code
 
 
-def verify_otp(db: Session, user: models.User, purpose: str, code: str) -> bool:
+def verify_otp(db: Session, user: UserModel, purpose: str, code: str) -> bool:
     """
     Validate the provided code for the user and purpose combination.
     """
@@ -47,14 +48,14 @@ def verify_otp(db: Session, user: models.User, purpose: str, code: str) -> bool:
     code_hash = _hash_code(code)
 
     otp = (
-        db.query(models.OTPToken)
+        db.query(OTPTokenModel)
         .filter(
-            models.OTPToken.user_id == user.id,
-            models.OTPToken.purpose == purpose,
-            models.OTPToken.is_used.is_(False),
-            models.OTPToken.expires_at >= now,
+            OTPTokenModel.user_id == user.id,
+            OTPTokenModel.purpose == purpose,
+            OTPTokenModel.is_used.is_(False),
+            OTPTokenModel.expires_at >= now,
         )
-        .order_by(models.OTPToken.created_at.desc())
+        .order_by(OTPTokenModel.created_at.desc())
         .first()
     )
 

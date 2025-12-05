@@ -2,30 +2,34 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from core import models, security, user_utils, notifications
-from core.config import settings
+from core import user_utils
+from notifications.manager import notification_manager
+from config import config as settings
 from services.auth_service import auth_service
+from models.user import User
+
+from security.hashing import get_password_hash
 
 
 class AdminService:
 
     @staticmethod
     def list_users(db: Session):
-        return db.query(models.User).order_by(models.User.id).all()
+        return db.query(User).order_by(User.id).all()
 
     @staticmethod
     def create_user(db: Session, data):
         # Check existing email
-        if db.query(models.User).filter(models.User.email == data.email).first():
+        if db.query(User).filter(User.email == data.email).first():
             raise HTTPException(status_code=400, detail="Email already registered")
 
         # Generate userid if needed
         userid = user_utils.generate_unique_userid(db, data.full_name, data.phone_number)
 
-        user = models.User(
+        user = User(
             userid=userid,
             email=data.email,
-            hashed_password=security.get_password_hash(data.password),
+            hashed_password=get_password_hash(data.password),
             full_name=data.full_name,
             role=data.role,
             phone_number=data.phone_number,
@@ -65,7 +69,7 @@ class AdminService:
         if payload.is_active is not None:
             user.is_active = payload.is_active
         if payload.password:
-            user.hashed_password = security.get_password_hash(payload.password)
+            user.hashed_password = get_password_hash(payload.password)
 
         db.commit()
         db.refresh(user)
@@ -74,7 +78,7 @@ class AdminService:
     @staticmethod
     def notify_user(db: Session, user_id: int, payload):
         user = auth_service.get_user_by_id(db, user_id)
-        delivered = notifications.send_telegram_message(user.telegram_chat_id, payload.message)
+        delivered = notification_manager.send_telegram_message(user.telegram_chat_id, payload.message)
         return {"delivered": delivered}
 
     @staticmethod

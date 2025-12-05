@@ -6,10 +6,17 @@ services:
     container_name: fastapi-backend
     ports:
       - "8000:8000"
+
+    # <-- Load .env from backend folder
+    env_file:
+      - ./backend/.env
+
     environment:
-      ENV: "DEV"
+      ENV_STATE: "dev"
+
     volumes:
-      - ./backend:/app
+      - ./backend:/app   # bind mount for live reload
+
     command: uvicorn main:app --host 0.0.0.0 --reload
     restart: unless-stopped
 
@@ -21,20 +28,26 @@ services:
     ports:
       - "3000:3000"
     environment:
-      ENV: "DEV"
+      ENV_STATE: "dev"
+
     volumes:
       - ./frontend:/app
       - /app/node_modules
+
     command: npm run dev
     restart: unless-stopped
 
   auth_db:
     image: postgres:15
     container_name: auth_db
+
+    # <-- Also load env for DATABASE settings
     env_file:
-      - .env
+      - ./backend/.env
+
     ports:
       - "${POSTGRES_PORT}:5432"
+
     volumes:
       - pgdata:/var/lib/postgresql/data
 

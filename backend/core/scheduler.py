@@ -5,10 +5,14 @@ from typing import Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.date import DateTrigger
+
 from sqlalchemy.orm import Session
 
-from . import models, jobs, database
+from . import jobs
+from db.session import SessionLocal
+
+from models.job_schedule import JobSchedule
+
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +26,9 @@ def init_scheduler():
         logger.info("Job scheduler started")
     
     # Load existing schedules from database
-    db = database.SessionLocal()
+    db = SessionLocal()
     try:
-        active_schedules = db.query(models.JobSchedule).filter(models.JobSchedule.is_active == True).all()
+        active_schedules = db.query(JobSchedule).filter(JobSchedule.is_active == True).all()
         for schedule in active_schedules:
             try:
                 add_scheduled_job(schedule, db=db)
@@ -33,7 +37,7 @@ def init_scheduler():
     finally:
         db.close()
 
-def get_trigger_from_schedule(schedule: models.JobSchedule):
+def get_trigger_from_schedule(schedule: JobSchedule):
     """Convert schedule model to APScheduler trigger"""
     schedule_data = json.loads(schedule.schedule_value)
     schedule_type = schedule.schedule_type
@@ -75,7 +79,7 @@ def get_trigger_from_schedule(schedule: models.JobSchedule):
     else:
         raise ValueError(f"Unknown schedule type: {schedule_type}")
 
-def calculate_next_run(schedule: models.JobSchedule) -> Optional[datetime]:
+def calculate_next_run(schedule: JobSchedule) -> Optional[datetime]:
     """Calculate the next run time for a schedule"""
     try:
         trigger = get_trigger_from_schedule(schedule)
@@ -88,7 +92,7 @@ def calculate_next_run(schedule: models.JobSchedule) -> Optional[datetime]:
         logger.error(f"Failed to calculate next run for schedule {schedule.id}: {e}")
         return None
 
-def add_scheduled_job(schedule: models.JobSchedule, db: Optional[Session] = None):
+def add_scheduled_job(schedule: JobSchedule, db: Optional[Session] = None):
     """Add a job to the scheduler"""
     job_id = f"schedule_{schedule.id}"
     
@@ -100,13 +104,13 @@ def add_scheduled_job(schedule: models.JobSchedule, db: Optional[Session] = None
     
     def run_scheduled_job():
         """Wrapper function to run the scheduled job"""
-        db_session = database.SessionLocal()
+        db_session = SessionLocal()
         try:
             logger.info(f"Running scheduled job: {schedule.job_type} (schedule ID: {schedule.id})")
             jobs.start_job(db_session, schedule.job_type, triggered_by="auto")
             
             # Update last_run_at
-            schedule_record = db_session.query(models.JobSchedule).filter(models.JobSchedule.id == schedule.id).first()
+            schedule_record = db_session.query(JobSchedule).filter(JobSchedule.id == schedule.id).first()
             if schedule_record:
                 schedule_record.last_run_at = datetime.utcnow()
                 schedule_record.next_run_at = calculate_next_run(schedule_record)
@@ -129,9 +133,9 @@ def add_scheduled_job(schedule: models.JobSchedule, db: Optional[Session] = None
         schedule.next_run_at = calculate_next_run(schedule)
         db.commit()
     else:
-        db_session = database.SessionLocal()
+        db_session = SessionLocal()
         try:
-            schedule_record = db_session.query(models.JobSchedule).filter(models.JobSchedule.id == schedule.id).first()
+            schedule_record = db_session.query(JobSchedule).filter(JobSchedule.id == schedule.id).first()
             if schedule_record:
                 schedule_record.next_run_at = calculate_next_run(schedule)
                 db_session.commit()
@@ -147,7 +151,7 @@ def remove_scheduled_job(schedule_id: int):
         scheduler.remove_job(job_id)
         logger.info(f"Removed scheduled job: {job_id}")
 
-def update_scheduled_job(schedule: models.JobSchedule, db: Optional[Session] = None):
+def update_scheduled_job(schedule: JobSchedule, db: Optional[Session] = None):
     """Update an existing scheduled job"""
     if schedule.is_active:
         add_scheduled_job(schedule, db)

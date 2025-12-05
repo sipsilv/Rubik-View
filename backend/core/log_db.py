@@ -1,7 +1,7 @@
 import sqlite3
 import os
 from datetime import datetime
-from .config import settings
+from config.config import settings
 
 DB_PATH = os.path.join(settings.BASE_DIR, "Data", "logs.db")
 

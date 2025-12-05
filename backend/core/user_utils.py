@@ -4,7 +4,8 @@ Utility functions for user management
 import random
 import string
 from sqlalchemy.orm import Session
-from . import models
+from models.user import User as UserModel
+from models.pending_user_request import PendingUserRequest as PendingUserRequestModel
 
 
 def generate_unique_userid(db: Session, full_name: str = None, phone_number: str = None, length: int = 8) -> str:
@@ -35,8 +36,8 @@ def generate_unique_userid(db: Session, full_name: str = None, phone_number: str
     base_userid = f"{name_part}{phone_part}"
     
     # Check if base userid exists, if so add random suffix
-    existing_user = db.query(models.User).filter(models.User.userid == base_userid).first()
-    existing_request = db.query(models.PendingUserRequest).filter(models.PendingUserRequest.userid == base_userid).first()
+    existing_user = db.query(UserModel).filter(UserModel.userid == base_userid).first()
+    existing_request = db.query(PendingUserRequestModel).filter(PendingUserRequestModel.userid == base_userid).first()
     
     if not existing_user and not existing_request:
         return base_userid
@@ -47,8 +48,8 @@ def generate_unique_userid(db: Session, full_name: str = None, phone_number: str
         random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
         userid = f"{base_userid}{random_suffix}"
         
-        existing_user = db.query(models.User).filter(models.User.userid == userid).first()
-        existing_request = db.query(models.PendingUserRequest).filter(models.PendingUserRequest.userid == userid).first()
+        existing_user = db.query(UserModel).filter(UserModel.userid == userid).first()
+        existing_request = db.query(PendingUserRequestModel).filter(PendingUserRequestModel.userid == userid).first()
         
         if not existing_user and not existing_request:
             return userid
@@ -74,9 +75,9 @@ def check_userid_unique(db: Session, userid: str, exclude_user_id: int = None) -
         return False
     
     # Check in users table
-    query = db.query(models.User).filter(models.User.userid == userid)
+    query = db.query(UserModel).filter(UserModel.userid == userid)
     if exclude_user_id:
-        query = query.filter(models.User.id != exclude_user_id)
+        query = query.filter(UserModel.id != exclude_user_id)
     existing_user = query.first()
     
     if existing_user:
@@ -84,14 +85,14 @@ def check_userid_unique(db: Session, userid: str, exclude_user_id: int = None) -
     
     # Check in pending requests (if not excluding a specific user)
     if not exclude_user_id:
-        existing_request = db.query(models.PendingUserRequest).filter(models.PendingUserRequest.userid == userid).first()
+        existing_request = db.query(PendingUserRequestModel).filter(PendingUserRequestModel.userid == userid).first()
         if existing_request:
             return False
     
     return True
 
 
-def is_user_active_now(user: models.User, inactive_threshold_minutes: int = 5) -> bool:
+def is_user_active_now(user: UserModel, inactive_threshold_minutes: int = 5) -> bool:
     """
     Check if user is currently active based on last_activity timestamp
     Returns True if user was active within threshold, False otherwise
